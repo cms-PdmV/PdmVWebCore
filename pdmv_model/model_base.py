@@ -267,9 +267,9 @@ class ModelBase():
                         'value': value})
         self.set('history', history)
 
-    @staticmethod
-    def lambda_check(name):
+    @classmethod
+    def lambda_check(cls, name):
         """
         Return a lambda check from default lambda checks dictionary
         """
-        return ModelBase.default_lambda_checks.get(name)
+        return cls.default_lambda_checks.get(name)
