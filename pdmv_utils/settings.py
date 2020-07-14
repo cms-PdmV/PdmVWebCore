@@ -1,7 +1,7 @@
 """
 Module that contains Settings class
 """
-from core.database.database import Database
+from ..pdmv_database.database import Database
 
 
 class Settings:

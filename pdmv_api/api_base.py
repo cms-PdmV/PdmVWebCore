@@ -7,7 +7,7 @@ import traceback
 import time
 from flask import request, make_response
 from flask_restful import Resource
-from core.utils.user_info import UserInfo
+from ..pdmv_utils.user_info import UserInfo
 
 
 class APIBase(Resource):

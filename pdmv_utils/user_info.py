@@ -2,7 +2,7 @@
 Module that contains UserInfo class
 """
 from flask import request
-from core.utils.settings import Settings
+from ..pdmv_utils.settings import Settings
 
 
 class UserInfo():
