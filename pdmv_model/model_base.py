@@ -32,11 +32,12 @@ class ModelBase():
         if json_input is None:
             json_input = {}
 
-        self.logger.debug('Creating %s object. JSON input present: %s, check values: %s',
+        self.initialized = False
+        self.logger.debug('Creating %s object. JSON input present: %s',
                           self.__class_name,
-                          'YES' if json_input else 'NO',
                           'YES' if json_input else 'NO')
         self.__fill_values(json_input)
+        self.initialized = True
         self.logger.debug('%s', str(self))
 
     def __fill_values(self, json_input):
