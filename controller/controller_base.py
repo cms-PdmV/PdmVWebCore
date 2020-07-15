@@ -2,9 +2,9 @@
 Module that contains ControllerBase class
 """
 import logging
-from ..pdmv_database.database import Database
-from ..pdmv_model.model_base import ModelBase
-from ..pdmv_utils.locker import Locker
+from ..database.database import Database
+from ..model.model_base import ModelBase
+from ..utils.locker import Locker
 
 
 class ControllerBase():

@@ -6,8 +6,8 @@ import logging
 import re
 import time
 from copy import deepcopy
-from ..pdmv_utils.user_info import UserInfo
-from ..pdmv_utils.common_utils import clean_split
+from ..utils.user_info import UserInfo
+from ..utils.common_utils import clean_split
 
 
 class ModelBase():
