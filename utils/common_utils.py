@@ -6,7 +6,7 @@ def clean_split(string, separator=','):
     """
     Split a string by separator and collect only non-empty values
     """
-    return [x.strip() for x in string.split(separator) if string.strip()]
+    return [x.strip() for x in string.split(separator) if x.strip()]
 
 def cmssw_setup(cmssw_release):
     """
