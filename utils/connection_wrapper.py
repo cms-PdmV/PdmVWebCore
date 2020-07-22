@@ -87,15 +87,15 @@ class ConnectionWrapper():
                                         json.dumps(data) if data else None,
                                         headers=all_headers)
                 response = self.connection.getresponse()
+                response_to_return = response.read()
                 if response.status != 200:
                     self.logger.error('Error %d while doing a %s to %s: %s',
                                       response.status,
                                       method,
                                       url,
-                                      response.read())
-                    return None
+                                      response_to_return)
+                    return response_to_return
 
-                response_to_return = response.read()
                 if not self.keep_open:
                     self.close()
 
