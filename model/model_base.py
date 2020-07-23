@@ -165,13 +165,37 @@ class ModelBase():
         indicates that this is a list of values
         """
         if attribute_name in self.lambda_checks:
-            return self.lambda_checks.get(attribute_name)(attribute_value)
+            self.logger.debug('Checking %s of %s', attribute_name, self.__class_name)
+            if not self.lambda_checks[attribute_name](attribute_value):
+                return False
 
-        if f'__{attribute_name}' in self.lambda_checks and isinstance(attribute_value, list):
-            lambda_check = self.lambda_checks.get(f'__{attribute_name}')
+        # List
+        if f'__{attribute_name}' in self.lambda_checks:
+            if not isinstance(attribute_value, list):
+                raise Exception(f'Expected {attribute_name} to be a list')
+
+            self.logger.debug('Checking %s elements of %s', attribute_name, self.__class_name)
+            lambda_check = self.lambda_checks[f'__{attribute_name}']
             for item in attribute_value:
                 if not lambda_check(item):
                     raise Exception(f'Bad {attribute_name} value "{item}"')
+
+        # Dict
+        if f'_{attribute_name}' in self.lambda_checks:
+            if not isinstance(attribute_value, dict):
+                raise Exception(f'Expected {attribute_name} to be a dict')
+
+            lambda_checks = self.lambda_checks[f'_{attribute_name}']
+            invalid_keys = set(attribute_value.keys()) - set(lambda_checks.keys())
+            if invalid_keys:
+                raise Exception(f'Keys {",".join(invalid_keys)} are not '
+                                f'allowed in {attribute_name}')
+
+            for key, lambda_check in lambda_checks.items():
+                self.logger.debug('Checking %s.%s of %s', attribute_name, key, self.__class_name)
+                value = attribute_value[key]
+                if not lambda_check(value):
+                    raise Exception(f'Bad {key} value "{value}" in {attribute_name} dictionary')
 
         return True
 

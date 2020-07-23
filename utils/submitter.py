@@ -136,3 +136,43 @@ class Submitter:
         Return a list of task names that are waiting in the queue
         """
         return [x[0] for x in self.__task_queue.queue]
+
+    def submit_job_dict(self, job_dict, connection):
+        """
+        Submit job dictionary to ReqMgr2
+        """
+        headers = {'Content-type': 'application/json',
+                    'Accept': 'application/json'}
+
+        try:
+            # Submit job dictionary (ReqMgr2 JSON)
+            reqmgr_response = connection.api('POST',
+                                             '/reqmgr2/data/request',
+                                             job_dict,
+                                             headers)
+            self.logger.info(reqmgr_response)
+            workflow_name = json.loads(reqmgr_response).get('result', [])[0].get('request')
+        except Exception:
+            if reqmgr_response:
+                reqmgr_response = str(reqmgr_response).replace('\\n', '\n')
+
+            raise Exception(f'Error submitting {prepid} to ReqMgr2:\n{reqmgr_response}')
+
+        return workflow_name
+
+    def approve_workflow(self, workflow_name, connection):
+        """
+        Approve workflow in ReqMgr2
+        """
+        try:
+            # Try to approve workflow (move to assignment-approved)
+            # If it does not succeed, ignore failure
+            approve_response = connection.api('PUT',
+                                                f'/reqmgr2/data/request/{workflow_name}',
+                                                {'RequestStatus': 'assignment-approved'},
+                                                headers)
+        except Exception as ex:
+            self.logger.error('Error approving %s: %s', workflow_name, str(ex))
+            return False
+
+        return True
