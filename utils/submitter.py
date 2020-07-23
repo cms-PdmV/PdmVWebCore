@@ -4,9 +4,9 @@ Module that has all classes used for request submission to computing
 import logging
 import time
 import traceback
+import json
 from threading import Thread
 from queue import Queue, Empty
-from core_lib.utils.settings import Settings
 
 
 class Worker(Thread):
@@ -142,21 +142,25 @@ class Submitter:
         Submit job dictionary to ReqMgr2
         """
         headers = {'Content-type': 'application/json',
-                    'Accept': 'application/json'}
+                   'Accept': 'application/json'}
 
+        reqmgr_response = None
         try:
             # Submit job dictionary (ReqMgr2 JSON)
             reqmgr_response = connection.api('POST',
                                              '/reqmgr2/data/request',
                                              job_dict,
                                              headers)
-            self.logger.info(reqmgr_response)
+            self.logger.debug(reqmgr_response)
             workflow_name = json.loads(reqmgr_response).get('result', [])[0].get('request')
-        except Exception:
+        except Exception as ex:
             if reqmgr_response:
-                reqmgr_response = str(reqmgr_response).replace('\\n', '\n')
+                error_message = str(reqmgr_response).replace('\\n', '\n')
+            else:
+                error_message = str(ex)
 
-            raise Exception(f'Error submitting {prepid} to ReqMgr2:\n{reqmgr_response}')
+            prepid = job_dict.get('PrepID')
+            raise Exception(f'Error submitting {prepid} to ReqMgr2:\n{error_message}')
 
         return workflow_name
 
@@ -164,13 +168,16 @@ class Submitter:
         """
         Approve workflow in ReqMgr2
         """
+        headers = {'Content-type': 'application/json',
+                   'Accept': 'application/json'}
+
         try:
             # Try to approve workflow (move to assignment-approved)
             # If it does not succeed, ignore failure
-            approve_response = connection.api('PUT',
-                                                f'/reqmgr2/data/request/{workflow_name}',
-                                                {'RequestStatus': 'assignment-approved'},
-                                                headers)
+            connection.api('PUT',
+                           f'/reqmgr2/data/request/{workflow_name}',
+                           {'RequestStatus': 'assignment-approved'},
+                           headers)
         except Exception as ex:
             self.logger.error('Error approving %s: %s', workflow_name, str(ex))
             return False
