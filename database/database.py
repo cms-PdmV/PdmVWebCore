@@ -33,15 +33,24 @@ class Database():
 
     @classmethod
     def set_host_port(cls, host, port):
+        """
+        Set global database hostname and port
+        """
         cls.__DATABASE_HOST = host
         cls.__DATABASE_PORT = port
 
     @classmethod
     def set_database_name(cls, database_name):
+        """
+        Set global database name
+        """
         cls.__DATABASE_NAME = database_name
 
     @classmethod
     def add_search_rename(cls, collection, value, renamed_value):
+        """
+        Add a global rename rule to query method
+        """
         if collection not in cls.__SEARCH_RENAME:
             cls.__SEARCH_RENAME[collection] = {}
 
