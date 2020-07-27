@@ -3,6 +3,7 @@ A module that handles all communication with MongoDB
 """
 import logging
 import time
+import json
 import os
 from pymongo import MongoClient
 
@@ -28,7 +29,28 @@ class Database():
         if not Database.__DATABASE_NAME:
             raise Exception('Database name is not set')
 
-        self.client = MongoClient(db_host, db_port)[Database.__DATABASE_NAME]
+        db_auth = os.environ.get('DB_AUTH', None)
+        username = None
+        password = None
+        if db_auth:
+            with open(db_auth) as json_file:
+                credentials = json.load(json_file)
+
+            username = credentials['username']
+            password = credentials['password']
+
+        if username and password:
+            self.logger.debug('Using DB with username and password')
+            self.client = MongoClient(db_host,
+                                      db_port,
+                                      username=username,
+                                      password=password,
+                                      authSource='admin',
+                                      authMechanism='SCRAM-SHA-256')[Database.__DATABASE_NAME]
+        else:
+            self.logger.debug('Using DB without username and password')
+            self.client = MongoClient(db_host, db_port)[Database.__DATABASE_NAME]
+
         self.collection = self.client[collection_name]
 
     @classmethod
