@@ -17,6 +17,8 @@ class Database():
     __DATABASE_PORT = 27017
     __DATABASE_NAME = None
     __SEARCH_RENAME = {}
+    __USERNAME = None
+    __PASSWORD = None
 
     def __init__(self, collection_name=None):
         """
@@ -29,22 +31,12 @@ class Database():
         if not Database.__DATABASE_NAME:
             raise Exception('Database name is not set')
 
-        db_auth = os.environ.get('DB_AUTH', None)
-        username = None
-        password = None
-        if db_auth:
-            with open(db_auth) as json_file:
-                credentials = json.load(json_file)
-
-            username = credentials['username']
-            password = credentials['password']
-
-        if username and password:
+        if Database.__USERNAME and Database.__PASSWORD:
             self.logger.debug('Using DB with username and password')
             self.client = MongoClient(db_host,
                                       db_port,
-                                      username=username,
-                                      password=password,
+                                      username=Database.__USERNAME,
+                                      password=Database.__PASSWORD,
                                       authSource='admin',
                                       authMechanism='SCRAM-SHA-256')[Database.__DATABASE_NAME]
         else:
@@ -77,6 +69,24 @@ class Database():
             cls.__SEARCH_RENAME[collection] = {}
 
         cls.__SEARCH_RENAME[collection][value] = renamed_value
+
+    @classmethod
+    def set_credentials(cls, username, password):
+        """
+        Set database username and password
+        """
+        cls.__USERNAME = username
+        cls.__PASSWORD = password
+
+    @classmethod
+    def set_credentials_file(cls, filename):
+        """
+        Load credentials from a JSON file
+        """
+        with open(filename) as json_file:
+            credentials = json.load(json_file)
+
+        cls.set_credentials(credentials['username'], credentials['password'])
 
     def get_count(self):
         """

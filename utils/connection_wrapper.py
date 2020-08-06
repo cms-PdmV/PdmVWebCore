@@ -13,7 +13,15 @@ class ConnectionWrapper():
     HTTP client wrapper class to re-use existing connection
     """
 
-    def __init__(self, host, port=443, https=True, timeout=120, keep_open=False, max_attempts=3):
+    def __init__(self,
+                 host,
+                 port=443,
+                 https=True,
+                 timeout=120,
+                 keep_open=False,
+                 max_attempts=3,
+                 cert_file=None,
+                 key_file=None):
         self.logger = logging.getLogger('logger')
         self.connection = None
         self.connection_attempts = max_attempts
@@ -24,18 +32,13 @@ class ConnectionWrapper():
         self.keep_open = keep_open
         self.port = port
         self.https = https
+        self.cert_file = cert_file
+        self.key_file = key_file
 
     def init_connection(self, url):
         """
         Return a new HTTPSConnection
         """
-        if self.cert_file is None or self.key_file is None:
-            self.cert_file = os.getenv('USERCRT', None)
-            self.key_file = os.getenv('USERKEY', None)
-
-        if self.cert_file is None or self.key_file is None:
-            raise Exception('Missing USERCRT or USERKEY environment variables')
-
         if self.https:
             return http.client.HTTPSConnection(url,
                                                port=self.port,
