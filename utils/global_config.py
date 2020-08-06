@@ -22,6 +22,12 @@ class Config():
         config = configparser.ConfigParser()
         config.read(filename)
         config = dict(config.items(section))
+        for key, value in dict(config).items():
+            if value.lower() in ('true', 'false'):
+                config[key] = value.lower() == 'true'
+            elif value.isdigit():
+                config[key] = int(value)
+
         cls.__CONFIG_VALUES = config
 
         return config
