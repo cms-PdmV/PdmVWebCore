@@ -170,43 +170,60 @@ class Database():
         query_dict = {}
         if query_string:
             query_dict = {'$and': []}
-            query_string_parts = [x.strip() for x in query_string.split('&&') if x.strip()]
+            query_string_parts = [x for x in query_string.split('&&') if x.strip()]
             self.logger.info('Query parts %s', query_string_parts)
             for part in query_string_parts:
                 split_part = part.split('=')
-                key = split_part[0]
-                value = split_part[1].replace('*', '.*')
-                value_condition = None
-                if '<' in value[0]:
-                    value_condition = '$lt'
-                    value = value[1:]
-                elif value[0] == '>':
-                    value_condition = '$gt'
-                    value = value[1:]
-                elif value[0] == '!':
-                    value_condition = '$ne'
-                    value = value[1:]
+                key = split_part[0].strip()
+                values = split_part[1].strip().replace('**', '*').replace('*', '.*')
+                value_or = []
+                for value in values.split(','):
+                    value = value.strip()
+                    value_condition = None
+                    if '<' in value[0]:
+                        value_condition = '$lt'
+                        value = value[1:]
+                    elif value[0] == '>':
+                        value_condition = '$gt'
+                        value = value[1:]
+                    elif value[0] == '!':
+                        value_condition = '$ne'
+                        value = value[1:]
 
-                if '<int>' in key:
-                    value = int(value)
-                    if value_condition:
-                        value = {value_condition: value}
+                    if '<int>' in key:
+                        value = int(value)
+                        if value_condition:
+                            value = {value_condition: value}
 
-                    query_dict['$and'].append({key.replace('<int>', ''): value})
-                elif '<float>' in key:
-                    value = float(value)
-                    if value_condition:
-                        value = {value_condition: value}
+                        value_or.append({key.replace('<int>', ''): value})
+                    elif '<float>' in key:
+                        value = float(value)
+                        if value_condition:
+                            value = {value_condition: value}
 
-                    query_dict['$and'].append({key.replace('<float>', ''): value})
-                else:
-                    if value_condition:
-                        value = {value_condition: value}
-                        query_dict['$and'].append({key: value})
-                    elif '*' in value:
-                        query_dict['$and'].append({key: {'$regex': value}})
+                        value_or.append({key.replace('<float>', ''): value})
+                    elif '<bool>' in key:
+                        value = bool(value.lower() in ('true', 'yes'))
+                        if value_condition:
+                            value = {value_condition: value}
+
+                        value_or.append({key.replace('<bool>', ''): value})
                     else:
-                        query_dict['$and'].append({key: value})
+                        if value_condition:
+                            value = {value_condition: value}
+                            value_or.append({key: value})
+                        elif '*' in value:
+                            value_or.append({key: {'$regex': value}})
+                        else:
+                            value_or.append({key: value})
+
+                if len(value_or) > 1:
+                    query_dict['$and'].append({'$or': value_or})
+                elif len(value_or) == 1:
+                    query_dict['$and'].append(value_or[0])
+
+            if len(query_dict['$and']) == 1:
+                query_dict = query_dict['$and'][0]
 
         self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
         result = self.collection.find(query_dict)
@@ -231,7 +248,7 @@ class Database():
             value = split_part[1]
             if key in Database.__SEARCH_RENAME.get(self.collection_name, {}):
                 key = Database.__SEARCH_RENAME[self.collection_name][key]
-            elif isinstance(schema.get(key), (int, float)):
+            elif isinstance(schema.get(key), (int, float, bool)):
                 key = f'{key}<{type(schema.get(key)).__name__}>'
 
             typed_arguments.append(f'{key}={value}')
