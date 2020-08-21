@@ -39,7 +39,12 @@ def upload_to_couch(cfg_file_name, label, user_name, group_name, database_url):
     database_name = 'reqmgr_config_cache'
     config_cache = ConfigCache(database_url, database_name)
     config_cache.createUserGroup(group_name, user_name)
-    config_cache.addConfig(cfg_file_name)
+    try:
+        # Because now WMCore uses urllib.request.urlopen instead of urllib.urlopen
+        config_cache.addConfig('file://%s' % (cfg_file_name))
+    except:
+        config_cache.addConfig(cfg_file_name)
+
     config_cache.setPSetTweaks(makeTweak(loaded_config.process).jsondictionary())
     config_cache.setLabel(label)
     config_cache.setDescription(label)
