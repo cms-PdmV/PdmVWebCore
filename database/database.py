@@ -117,15 +117,15 @@ class Database():
         """
         if not isinstance(document, dict):
             self.logger.error('%s is not a dictionary', document)
-            return
+            return False
 
         document_id = document.get('_id', '')
         document_id = document_id.strip()
         if not document_id:
             self.logger.error('%s does not have a _id', document)
-            return
+            return False
 
-        self.collection.delete_one({'_id': document_id})
+        return self.collection.delete_one({'_id': document_id})
 
     def save(self, document):
         """

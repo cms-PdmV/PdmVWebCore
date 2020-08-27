@@ -49,6 +49,8 @@ class ControllerBase():
             if not database.save(new_object.get_json()):
                 raise Exception(f'Error saving {prepid} to database')
 
+            self.after_create(new_object)
+
         return new_object
 
     def get(self, prepid):
@@ -62,11 +64,14 @@ class ControllerBase():
 
         return None
 
-    def update(self, json_data, force_update=False):
+    def update(self, new_object, force_update=False):
         """
         Update a single object with given json
         """
-        new_object = self.model_class(json_input=json_data)
+        # Allow either objects or their dictionaries
+        if isinstance(new_object, dict):
+            new_object = self.model_class(json_input=new_object)
+
         prepid = new_object.get_prepid()
         with self.locker.get_nonblocking_lock(prepid):
             self.logger.info('Will edit %s', prepid)
@@ -86,14 +91,19 @@ class ControllerBase():
                 return old_object.get_json()
 
             if not force_update:
-                self.edit_allowed(old_object, changed_values)
+                if not self.edit_allowed(old_object, new_object, changed_values):
+                    self.logger.error('Editing was not allowed for %s', prepid)
+
                 new_object.add_history('update', changed_values, None)
                 if not self.check_for_update(old_object, new_object, changed_values):
                     self.logger.error('Error while updating %s', prepid)
                     return None
 
-            self.before_update(new_object)
-            database.save(new_object.get_json())
+            self.before_update(old_object, new_object, changed_values)
+            if not database.save(new_object.get_json()):
+                raise Exception(f'Error saving {prepid} to database')
+
+            self.after_update(old_object, new_object, changed_values)
             return new_object.get_json()
 
     def delete(self, json_data):
@@ -115,7 +125,10 @@ class ControllerBase():
                 return None
 
             self.before_delete(obj)
-            database.delete_document(obj.get_json())
+            if not database.delete_document(obj.get_json()):
+                raise Exception(f'Error deleting {prepid} from database')
+
+            self.after_delete(obj)
 
         return {'prepid': prepid}
 
@@ -139,19 +152,37 @@ class ControllerBase():
 
     def before_create(self, obj):
         """
-        Actions to be performed on object before object is updated
+        Actions to be performed before object is updated
         """
         return
 
-    def before_update(self, obj):
+    def after_create(self, obj):
         """
-        Actions to be performed on object before object is updated
+        Actions to be performed after object is updated
+        """
+        return
+
+    def before_update(self, old_obj, new_obj, changed_values):
+        """
+        Actions to be performed before object is updated
+        """
+        return
+
+    def after_update(self, old_obj, new_obj, changed_values):
+        """
+        Actions to be performed after object is updated
         """
         return
 
     def before_delete(self, obj):
         """
-        Actions to be performed on object before object is deleted
+        Actions to be performed before object is deleted
+        """
+        return
+
+    def after_delete(self, obj):
+        """
+        Actions to be performed after object is deleted
         """
         return
 
@@ -166,12 +197,12 @@ class ControllerBase():
         """
         return {k: False for k in obj.get_json().keys()}
 
-    def edit_allowed(self, obj, changed_values):
+    def edit_allowed(self, old_obj, new_obj, changed_values):
         """
         Check whether done edit is allowed based on editing info
         and changed values
         """
-        editing_info = self.get_editing_info(obj)
+        editing_info = self.get_editing_info(old_obj)
         if not editing_info:
             return True
 
