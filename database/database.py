@@ -176,8 +176,14 @@ class Database():
                 split_part = part.split('=')
                 key = split_part[0].strip()
                 values = split_part[1].strip().replace('**', '*').replace('*', '.*')
+                values = [value.strip() for value in values.split(',') if value.strip()]
+                if not values:
+                    # If no value is given, then no results will be returned
+                    # For example "prepid=" shou return nothing
+                    return [], 0
+
                 value_or = []
-                for value in values.split(','):
+                for value in values:
                     value = value.strip()
                     value_condition = None
                     if '<' in value[0]:
