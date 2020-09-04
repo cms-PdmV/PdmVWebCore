@@ -257,17 +257,17 @@ class ControllerBase():
 
     def get_highest_serial_number(self, database, query):
         """
-        Return highest sequence number of existing object
-        If object does not exist return 0
+        Return a sequence number of "highest" _id, including deleted
         """
-        serial_numbers = database.query(f'prepid={query}',
-                                        limit=1,
-                                        sort_asc=False)
-        if not serial_numbers:
+        results = database.query(f'_id={query}',
+                                 limit=1,
+                                 sort_attr='_id',
+                                 sort_asc=False,
+                                 include_deleted=True)
+        if not results:
             serial_number = 0
         else:
-            serial_number = serial_numbers[0]['prepid']
-            serial_number = int(serial_number.split('-')[-1])
+            serial_number = int(results[0]['_id'].split('-')[-1])
 
         self.logger.debug('Highest serial number for %s is %s', query, serial_number)
         return serial_number

@@ -111,9 +111,12 @@ class Database():
         response = self.get(document_id)
         return bool(response)
 
-    def delete_document(self, document):
+    def delete_document(self, document, purge=False):
         """
         Delete a document
+        It does not actually delete a document, just removes all attributes
+        except _id and marks it as "deleted"
+        If purge is set to True, then document is actually removed from DB
         """
         if not isinstance(document, dict):
             self.logger.error('%s is not a dictionary', document)
@@ -125,7 +128,12 @@ class Database():
             self.logger.error('%s does not have a _id', document)
             return False
 
-        return self.collection.delete_one({'_id': document_id})
+        if purge:
+            return self.collection.delete_one({'_id': document_id})
+
+        deleted_document = {'_id': document_id,
+                            'deleted': True}
+        return self.save(deleted_document)
 
     def save(self, document):
         """
@@ -151,30 +159,43 @@ class Database():
     def query(self,
               query_string=None,
               page=0, limit=20,
-              sort_attr=None, sort_asc=True):
+              sort_attr=None, sort_asc=True,
+              include_deleted=False):
         """
         Same as query_with_total_rows, but return only list of objects
         """
-        return self.query_with_total_rows(query_string, page, limit, sort_attr, sort_asc)[0]
+        return self.query_with_total_rows(query_string,
+                                          page,
+                                          limit,
+                                          sort_attr,
+                                          sort_asc,
+                                          include_deleted)[0]
 
     def query_with_total_rows(self,
                               query_string=None,
                               page=0, limit=20,
-                              sort_attr=None, sort_asc=True):
+                              sort_attr=None, sort_asc=True,
+                              include_deleted=False):
         """
         Perform a query in a database
         And operator is &&
         Example prepid=*19*&&is_root=false
         This is horrible, please think of something better
         """
-        query_dict = {}
+        query_dict = {'$and': []}
+        if not include_deleted:
+            query_dict['$and'].append({'deleted': {'$ne': True}})
+
         if query_string:
-            query_dict = {'$and': []}
             query_string_parts = [x for x in query_string.split('&&') if x.strip()]
             self.logger.info('Query parts %s', query_string_parts)
             for part in query_string_parts:
                 split_part = part.split('=')
                 key = split_part[0].strip()
+                if key == 'deleted':
+                    # Prevent cheating
+                    continue
+
                 values = split_part[1].strip().replace('**', '*').replace('*', '.*')
                 values = [value.strip() for value in values.split(',') if value.strip()]
                 if not values:
@@ -228,8 +249,10 @@ class Database():
                 elif len(value_or) == 1:
                     query_dict['$and'].append(value_or[0])
 
-            if len(query_dict['$and']) == 1:
-                query_dict = query_dict['$and'][0]
+        if len(query_dict['$and']) == 1:
+            query_dict = query_dict['$and'][0]
+        elif len(query_dict['$and']) == 0:
+            query_dict = {}
 
         self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
         result = self.collection.find(query_dict)
