@@ -42,7 +42,7 @@ def upload_to_couch(cfg_file_name, label, user_name, group_name, database_url):
     try:
         # Because now WMCore uses urllib.request.urlopen instead of urllib.urlopen
         config_cache.addConfig('file://%s' % (cfg_file_name))
-    except:
+    except Exception:
         config_cache.addConfig(cfg_file_name)
 
     config_cache.setPSetTweaks(makeTweak(loaded_config.process).jsondictionary())

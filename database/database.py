@@ -251,7 +251,7 @@ class Database():
 
         if len(query_dict['$and']) == 1:
             query_dict = query_dict['$and'][0]
-        elif len(query_dict['$and']) == 0:
+        elif not query_dict['$and']:
             query_dict = {}
 
         self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
