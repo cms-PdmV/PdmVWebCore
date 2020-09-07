@@ -121,8 +121,7 @@ class ControllerBase():
         with self.locker.get_nonblocking_lock(prepid, f'Deleting {prepid}'):
             self.logger.info('Will delete %s', (prepid))
             if not self.check_for_delete(obj):
-                self.logger.error('Error while deleting %s', prepid)
-                return None
+                raise Exception(f'Deleting {prepid} is not allowed')
 
             self.before_delete(obj)
             if not database.delete_document(obj.get_json()):
