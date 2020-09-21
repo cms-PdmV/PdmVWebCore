@@ -38,7 +38,7 @@ class ModelBase():
                           'YES' if json_input else 'NO')
         self.__fill_values(json_input)
         self.initialized = True
-        self.logger.debug('%s', str(self))
+        # self.logger.debug('%s', str(self))
 
     def __fill_values(self, json_input):
         """
@@ -165,7 +165,6 @@ class ModelBase():
         indicates that this is a list of values
         """
         if attribute_name in self.lambda_checks:
-            self.logger.debug('Checking %s of %s', attribute_name, self.__class_name)
             if not self.lambda_checks[attribute_name](attribute_value):
                 return False
 
@@ -174,7 +173,6 @@ class ModelBase():
             if not isinstance(attribute_value, list):
                 raise Exception(f'Expected {attribute_name} to be a list')
 
-            self.logger.debug('Checking %s elements of %s', attribute_name, self.__class_name)
             lambda_check = self.lambda_checks[f'__{attribute_name}']
             for item in attribute_value:
                 if not lambda_check(item):
@@ -192,7 +190,6 @@ class ModelBase():
                                 f'allowed in {attribute_name}')
 
             for key, lambda_check in lambda_checks.items():
-                self.logger.debug('Checking %s.%s of %s', attribute_name, key, self.__class_name)
                 value = attribute_value[key]
                 if not lambda_check(value):
                     raise Exception(f'Bad {key} value "{value}" in {attribute_name} dictionary')

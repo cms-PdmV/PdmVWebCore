@@ -32,7 +32,7 @@ class Database():
             raise Exception('Database name is not set')
 
         if Database.__USERNAME and Database.__PASSWORD:
-            self.logger.debug('Using DB with username and password')
+            self.logger.debug('Using DB with username and password. DB: %s', collection_name)
             self.client = MongoClient(db_host,
                                       db_port,
                                       username=Database.__USERNAME,
