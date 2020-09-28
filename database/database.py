@@ -258,7 +258,11 @@ class Database():
         result = self.collection.find(query_dict)
         if not sort_attr:
             sort_attr = '_id'
+        elif sort_attr in Database.__SEARCH_RENAME.get(self.collection_name, {}):
+            sort_attr = Database.__SEARCH_RENAME[self.collection_name][sort_attr]
 
+        sort_attr = sort_attr.replace('<int>', '').replace('<float>', '').replace('<bool>', '')
+        self.logger.debug('Sorting on %s ascending %s', sort_attr, 'YES' if sort_asc else 'NO')
         result = result.sort(sort_attr, 1 if sort_asc else -1)
         total_rows = result.count()
         result = result.skip(page * limit).limit(limit)
