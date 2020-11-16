@@ -5,7 +5,7 @@ import logging
 import time
 import json
 import os
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING
 
 
 class Database():
@@ -254,12 +254,16 @@ class Database():
         elif not query_dict['$and']:
             query_dict = {}
 
-        self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
-        result = self.collection.find(query_dict)
         if not sort_attr:
             sort_attr = '_id'
+        elif sort_attr in Database.__SEARCH_RENAME.get(self.collection_name, {}):
+            sort_attr = Database.__SEARCH_RENAME[self.collection_name][sort_attr]
 
-        result = result.sort(sort_attr, 1 if sort_asc else -1)
+        sort_attr = sort_attr.replace('<int>', '').replace('<float>', '').replace('<bool>', '')
+        self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
+        self.logger.debug('Sorting on %s ascending %s', sort_attr, 'YES' if sort_asc else 'NO')
+        result = self.collection.find(query_dict)
+        result = result.sort(sort_attr, ASCENDING if sort_asc else DESCENDING)
         total_rows = result.count()
         result = result.skip(page * limit).limit(limit)
         return list(result), int(total_rows)
