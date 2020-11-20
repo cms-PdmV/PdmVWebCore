@@ -3,6 +3,7 @@ Module that contains UserInfo class
 """
 from flask import request
 from ..utils.settings import Settings
+from ..utils.cache import TimeoutCache
 
 
 class UserInfo():
@@ -10,11 +11,37 @@ class UserInfo():
     Class that holds information about user
     Information is obtained from headers supplied by SSO proxy
     """
+    __cache = TimeoutCache()
 
     def __init__(self):
         self.__user = None
-        self.__role_groups = Settings().get('roles')
-        self.__roles = [x['role'] for x in self.__role_groups]
+        self.__role_groups = self.__get_role_groups()
+        self.__roles = self.__get_roles()
+
+    def __get_roles(self):
+        """
+        Return list of role names
+        """
+        cached_value = self.__cache.get('roles')
+        if cached_value:
+            return cached_value
+
+        roles = [x['role'] for x in self.__role_groups]
+        self.__cache.set('roles', roles)
+        return roles
+
+    def __get_role_groups(self):
+        """
+        Return list of dictionaries where each dict has a "groups" list of e-groups
+        and a "role" which is the role name
+        """
+        cached_value = self.__cache.get('role_groups')
+        if cached_value:
+            return cached_value
+
+        role_groups = Settings().get('roles')
+        self.__cache.set('role_groups', role_groups)
+        return role_groups
 
     def get_user_info(self):
         """
