@@ -171,6 +171,60 @@ class Database():
                                           sort_asc,
                                           include_deleted)[0]
 
+    def get_value_query(self, key, values):
+        """
+        Check for < > and ! in front of values, handle OR operation, use correct attribute type
+        """
+        value_or = []
+        for value in values:
+            value = value.strip()
+            value_condition = None
+            if '<' in value[0]:
+                value_condition = '$lt'
+                value = value[1:]
+            elif value[0] == '>':
+                value_condition = '$gt'
+                value = value[1:]
+            elif value[0] == '!':
+                value_condition = '$ne'
+                value = value[1:]
+
+            if '<int>' in key:
+                value = int(value)
+                if value_condition:
+                    value = {value_condition: value}
+
+                value_or.append({key.replace('<int>', ''): value})
+            elif '<float>' in key:
+                value = float(value)
+                if value_condition:
+                    value = {value_condition: value}
+
+                value_or.append({key.replace('<float>', ''): value})
+            elif '<bool>' in key:
+                value = bool(value.lower() in ('true', 'yes'))
+                if value_condition:
+                    value = {value_condition: value}
+
+                value_or.append({key.replace('<bool>', ''): value})
+            else:
+                if value_condition:
+                    value = {value_condition: value}
+                    value_or.append({key: value})
+                elif '*' in value:
+                    value_or.append({key: {'$regex': value}})
+                else:
+                    value_or.append({key: value})
+
+        self.logger.debug('Key: %s, values: %s, query: %s', key, values, value_or)
+        if len(value_or) > 1:
+            return {'$or': value_or}
+
+        if len(value_or) == 1:
+            return value_or[0]
+
+        return None
+
     def query_with_total_rows(self,
                               query_string=None,
                               page=0, limit=20,
@@ -203,51 +257,9 @@ class Database():
                     # For example "prepid=" shou return nothing
                     return [], 0
 
-                value_or = []
-                for value in values:
-                    value = value.strip()
-                    value_condition = None
-                    if '<' in value[0]:
-                        value_condition = '$lt'
-                        value = value[1:]
-                    elif value[0] == '>':
-                        value_condition = '$gt'
-                        value = value[1:]
-                    elif value[0] == '!':
-                        value_condition = '$ne'
-                        value = value[1:]
-
-                    if '<int>' in key:
-                        value = int(value)
-                        if value_condition:
-                            value = {value_condition: value}
-
-                        value_or.append({key.replace('<int>', ''): value})
-                    elif '<float>' in key:
-                        value = float(value)
-                        if value_condition:
-                            value = {value_condition: value}
-
-                        value_or.append({key.replace('<float>', ''): value})
-                    elif '<bool>' in key:
-                        value = bool(value.lower() in ('true', 'yes'))
-                        if value_condition:
-                            value = {value_condition: value}
-
-                        value_or.append({key.replace('<bool>', ''): value})
-                    else:
-                        if value_condition:
-                            value = {value_condition: value}
-                            value_or.append({key: value})
-                        elif '*' in value:
-                            value_or.append({key: {'$regex': value}})
-                        else:
-                            value_or.append({key: value})
-
-                if len(value_or) > 1:
-                    query_dict['$and'].append({'$or': value_or})
-                elif len(value_or) == 1:
-                    query_dict['$and'].append(value_or[0])
+                value_query = self.get_value_query(key, values)
+                if value_query:
+                    query_dict['$and'].append(value_query)
 
         if len(query_dict['$and']) == 1:
             query_dict = query_dict['$and'][0]

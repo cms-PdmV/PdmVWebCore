@@ -131,6 +131,7 @@ class ControllerBase():
 
         return {'prepid': prepid}
 
+    #pylint: disable=no-self-use,unused-argument
     def check_for_create(self, obj):
         """
         Perform checks on object before adding it to database
@@ -184,6 +185,7 @@ class ControllerBase():
         Actions to be performed after object is deleted
         """
         return
+    #pylint: enable=no-self-use,unused-argument
 
     def get_editing_info(self, obj):
         """
@@ -194,6 +196,7 @@ class ControllerBase():
           "notes": True
         }
         """
+        self.logger.debug('Returning default editing info for %s', obj.get_prepid())
         return {k: False for k in obj.get_json().keys()}
 
     def edit_allowed(self, old_obj, new_obj, changed_values):
@@ -201,6 +204,7 @@ class ControllerBase():
         Check whether done edit is allowed based on editing info
         and changed values
         """
+        self.logger.debug('Checking if edit allowed for %s', new_obj.get_prepid())
         editing_info = self.get_editing_info(old_obj)
         if not editing_info:
             return True
