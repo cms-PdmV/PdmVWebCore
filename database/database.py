@@ -5,6 +5,7 @@ import logging
 import time
 import json
 import os
+import re
 from pymongo import MongoClient, ASCENDING, DESCENDING
 
 
@@ -160,7 +161,8 @@ class Database():
               query_string=None,
               page=0, limit=20,
               sort_attr=None, sort_asc=True,
-              include_deleted=False):
+              include_deleted=False,
+              ignore_case=False):
         """
         Same as query_with_total_rows, but return only list of objects
         """
@@ -169,9 +171,10 @@ class Database():
                                           limit,
                                           sort_attr,
                                           sort_asc,
-                                          include_deleted)[0]
+                                          include_deleted,
+                                          ignore_case)[0]
 
-    def get_value_query(self, key, values):
+    def get_value_query(self, key, values, ignore_case=False):
         """
         Check for < > and ! in front of values, handle OR operation, use correct attribute type
         """
@@ -211,10 +214,17 @@ class Database():
                 if value_condition:
                     value = {value_condition: value}
                     value_or.append({key: value})
-                elif '*' in value:
-                    value_or.append({key: {'$regex': value}})
                 else:
-                    value_or.append({key: value})
+                    if '*' in value:
+                        if ignore_case:
+                            value = re.compile(value, re.IGNORECASE)
+
+                        value_or.append({key: {'$regex': value}})
+                    else:
+                        if ignore_case:
+                            value = re.compile(value, re.IGNORECASE)
+
+                        value_or.append({key: value})
 
         self.logger.debug('Key: %s, values: %s, query: %s', key, values, value_or)
         if len(value_or) > 1:
@@ -229,7 +239,8 @@ class Database():
                               query_string=None,
                               page=0, limit=20,
                               sort_attr=None, sort_asc=True,
-                              include_deleted=False):
+                              include_deleted=False,
+                              ignore_case=False):
         """
         Perform a query in a database
         And operator is &&
@@ -257,7 +268,7 @@ class Database():
                     # For example "prepid=" shou return nothing
                     return [], 0
 
-                value_query = self.get_value_query(key, values)
+                value_query = self.get_value_query(key, values, ignore_case)
                 if value_query:
                     query_dict['$and'].append(value_query)
 
