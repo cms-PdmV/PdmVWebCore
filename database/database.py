@@ -174,24 +174,31 @@ class Database():
                                           include_deleted,
                                           ignore_case)[0]
 
+    def get_value_condition(self, value):
+        """
+        Get a condition from value and return value and condition separately
+        """
+        value_condition = None
+        if '<' in value[0]:
+            value_condition = '$lt'
+            value = value[1:]
+        elif value[0] == '>':
+            value_condition = '$gt'
+            value = value[1:]
+        elif value[0] == '!':
+            value_condition = '$ne'
+            value = value[1:]
+
+        self.logger.debug('Value: %s, condition: %s', value, value_condition)
+        return value, value_condition
+
     def get_value_query(self, key, values, ignore_case=False):
         """
         Check for < > and ! in front of values, handle OR operation, use correct attribute type
         """
         value_or = []
         for value in values:
-            value = value.strip()
-            value_condition = None
-            if '<' in value[0]:
-                value_condition = '$lt'
-                value = value[1:]
-            elif value[0] == '>':
-                value_condition = '$gt'
-                value = value[1:]
-            elif value[0] == '!':
-                value_condition = '$ne'
-                value = value[1:]
-
+            value, value_condition = self.get_value_condition(value.strip())
             if '<int>' in key:
                 value = int(value)
                 if value_condition:
