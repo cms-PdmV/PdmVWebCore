@@ -24,23 +24,23 @@ class ModelBase():
     default_lambda_checks = {}
     lambda_checks = {}
 
-    def __init__(self, json_input=None):
+    def __init__(self, json_input=None, check_attributes=True):
         self.__json = {}
         self.logger = ModelBase.__logger
         self.__class_name = self.__class__.__name__
 
         if json_input is None:
             json_input = {}
+            check_attributes = False
 
         self.initialized = False
         self.logger.debug('Creating %s object. JSON input present: %s',
                           self.__class_name,
                           'YES' if json_input else 'NO')
-        self.__fill_values(json_input)
+        self.__fill_values(json_input, check_attributes)
         self.initialized = True
-        # self.logger.debug('%s', str(self))
 
-    def __fill_values(self, json_input):
+    def __fill_values(self, json_input, check_attributes=True):
         """
         Copy values from given dictionary to object's json
         Initialize default values from schema if any are missing
@@ -64,9 +64,9 @@ class ModelBase():
                                     ', '.join(bad_keys))
                 # raise Exception(f'Invalid key "{", ".join(bad_keys)}" for {self.__class_name}')
 
-        self.__fill_values_dict(self.__json, json_input, self.__schema, '')
+        self.__fill_values_dict(self.__json, json_input, self.__schema, '', check_attributes)
 
-    def __set(self, attribute, target_dict, value):
+    def __set(self, attribute, target_dict, value, check=True):
         prepid = self.get_prepid()
         attribute = attribute.strip('.')
         attribute_in_schema = self.__attribute_in_schema(attribute)
@@ -78,7 +78,7 @@ class ModelBase():
                               type(value))
             value = self.cast_value_to_correct_type(attribute, value)
 
-        if not self.check_attribute(attribute, value):
+        if check and not self.check_attribute(attribute, value):
             self.logger.error('Invalid value "%s" for key "%s" for object %s of type %s',
                               value,
                               attribute,
@@ -88,23 +88,29 @@ class ModelBase():
 
         target_dict[attribute.split('.')[-1]] = value
 
-    def __fill_values_dict(self, target_dict, source_dict, schema_dict, attribute_prefix):
+    def __fill_values_dict(self, target_dict, source_dict, schema_dict, attribute_prefix, check):
         attribute_prefix = attribute_prefix.strip('.')
 
         for key, default_value in schema_dict.items():
             if key == '_id':
                 continue
 
+            # Default value here is another dict from schema
+            # It will be used not as value, but as new schema
             if isinstance(default_value, dict) and default_value:
                 target_dict[key] = {}
                 self.__fill_values_dict(target_dict[key],
                                         source_dict.get(key, {}),
                                         default_value,
-                                        f'{attribute_prefix}.{key}')
+                                        f'{attribute_prefix}.{key}',
+                                        check)
             elif key not in source_dict:
                 target_dict[key] = default_value
             else:
-                self.__set(f'{attribute_prefix}.{key}', target_dict, source_dict[key])
+                self.__set(f'{attribute_prefix}.{key}',
+                           target_dict,
+                           source_dict[key],
+                           check)
 
     def set(self, attribute, value=None):
         """

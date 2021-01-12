@@ -60,7 +60,7 @@ class ControllerBase():
         database = Database(self.database_name)
         object_json = database.get(prepid)
         if object_json:
-            return self.model_class(json_input=object_json)
+            return self.model_class(json_input=object_json, check_attributes=False)
 
         return None
 
