@@ -78,6 +78,9 @@ class ModelBase():
                               type(value))
             value = self.cast_value_to_correct_type(attribute, value)
 
+        if isinstance(value, str):
+            value = value.strip()
+
         if check and not self.check_attribute(attribute, value):
             self.logger.error('Invalid value "%s" for key "%s" for object %s of type %s',
                               value,
@@ -85,9 +88,6 @@ class ModelBase():
                               prepid,
                               self.__class_name)
             raise Exception(f'Invalid {attribute} value {value} for {prepid}')
-
-        if isinstance(value, str):
-            value = value.strip()
 
         target_dict[attribute.split('.')[-1]] = value
 
