@@ -86,6 +86,9 @@ class ModelBase():
                               self.__class_name)
             raise Exception(f'Invalid {attribute} value {value} for {prepid}')
 
+        if isinstance(value, str):
+            value = value.strip()
+
         target_dict[attribute.split('.')[-1]] = value
 
     def __fill_values_dict(self, target_dict, source_dict, schema_dict, attribute_prefix, check):
