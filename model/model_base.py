@@ -29,15 +29,20 @@ class ModelBase():
         self.logger = ModelBase.__logger
         self.__class_name = self.__class__.__name__
 
+        self.initialized = False
         if json_input is None:
-            json_input = {}
+            json_input = self.schema()
             check_attributes = False
 
-        self.initialized = False
-        self.logger.debug('Creating %s object. JSON input present: %s',
-                          self.__class_name,
-                          'YES' if json_input else 'NO')
-        self.__fill_values(json_input, check_attributes)
+        if check_attributes:
+            self.logger.debug('Creating %s object. JSON input present: %s',
+                              self.__class_name,
+                              'YES' if json_input else 'NO')
+            self.__fill_values(json_input, check_attributes)
+        else:
+            self.logger.debug('Using JSON input for %s', self.__class_name)
+            self.__json = json_input
+
         self.initialized = True
 
     def __fill_values(self, json_input, check_attributes=True):
