@@ -81,7 +81,7 @@ class ControllerBase():
                 raise Exception(f'Object with prepid "{prepid}" does not '
                                 f'exist in {self.database_name} database')
 
-            old_object = self.model_class(json_input=old_object_json)
+            old_object = self.model_class(json_input=old_object_json, check_attributes=False)
             # Move over history, so it could not be overwritten
             new_object.set('history', old_object.get('history'))
             changed_values = self.get_changes(old_object_json, new_object.get_json())
