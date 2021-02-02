@@ -8,7 +8,6 @@ import time
 from flask import request, make_response
 from flask_restful import Resource
 from ..utils.user_info import UserInfo
-from ..utils.global_config import Config
 
 
 class APIBase(Resource):
