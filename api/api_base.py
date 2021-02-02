@@ -8,6 +8,7 @@ import time
 from flask import request, make_response
 from flask_restful import Resource
 from ..utils.user_info import UserInfo
+from ..utils.global_config import Config
 
 
 class APIBase(Resource):
@@ -22,9 +23,6 @@ class APIBase(Resource):
     """
 
     def __init__(self):
-        """
-        Init
-        """
         Resource.__init__(self)
         self.logger = logging.getLogger()
 
@@ -32,15 +30,14 @@ class APIBase(Resource):
         attr = object.__getattribute__(self, name)
         if name in ('get', 'put', 'post', 'delete') and hasattr(attr, '__call__'):
             def newfunc(*args, **kwargs):
-                user_info = UserInfo()
                 start_time = time.time()
                 result = attr(*args, **kwargs)
                 end_time = time.time()
-                self.logger.info('[%s] {%s} %s %.4fs',
+                self.logger.info('[%s] %s %.4fs %s',
                                  attr.__name__.upper(),
-                                 user_info.get_username(),
                                  request.path,
-                                 end_time - start_time)
+                                 end_time - start_time,
+                                 result.status_code)
                 return result
 
             return newfunc
@@ -57,7 +54,7 @@ class APIBase(Resource):
             Wrapper around actual function
             """
             data = request.data
-            logging.getLogger().info('Checking if data exists...')
+            logging.getLogger().info('Ensuring request data for %s', request.path)
             if not data:
                 logging.getLogger().error('No data was found in request')
                 return APIBase.output_text({'response': None,

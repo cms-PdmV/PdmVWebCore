@@ -260,7 +260,7 @@ class Database():
 
         if query_string:
             query_string_parts = [x for x in query_string.split('&&') if x.strip()]
-            self.logger.info('Query parts %s', query_string_parts)
+            self.logger.debug('Query parts %s', query_string_parts)
             for part in query_string_parts:
                 split_part = part.split('=')
                 key = split_part[0].strip()

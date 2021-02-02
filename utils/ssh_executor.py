@@ -60,6 +60,7 @@ class SSHExecutor():
         """
         Execute command over SSH
         """
+        start_time = time.time()
         if isinstance(command, list):
             command = '; '.join(command)
 
@@ -91,14 +92,18 @@ class SSHExecutor():
             else:
                 break
 
+        end_time = time.time()
         # Read output from stdout and stderr streams
-        self.logger.debug('Exit code %s of %s', exit_code, command)
+        self.logger.info('SSH command exit code %s, executed in %.2fs, command:\n\n%s\n',
+                         exit_code,
+                         end_time - start_time,
+                         command.replace('; ', '\n'))
 
         if stdout:
-            self.logger.debug('STDOUT (%s): %s', command, stdout)
+            self.logger.debug('STDOUT: %s', stdout)
 
         if stderr:
-            self.logger.error('STDERR (%s): %s', command, stderr)
+            self.logger.error('STDERR: %s', stderr)
 
         return stdout, stderr, exit_code
 
