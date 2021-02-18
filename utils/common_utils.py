@@ -35,6 +35,25 @@ def cmssw_setup(cmssw_release, reuse_cmssw=False):
     return '\n'.join(commands)
 
 
+def config_cache_lite_setup(reuse_files=False):
+    """
+    Return code needed to set up ConfigCacheLite and TweakMakerLite
+    """
+    commands = []
+    repo = 'https://github.com/cms-PdmV/ConfigCacheLite.git'
+    if reuse_files:
+        commands += ['ORG_PWD=$(pwd)',
+                     'cd ..']
+
+    commands += [f'if [ ! -r ConfigCacheLite ] ; then git clone --quiet {repo} ; fi',
+                 'export PYTHONPATH=$(pwd)/ConfigCacheLite/:$PYTHONPATH']
+
+    if reuse_files:
+        commands += ['cd $ORG_PWD']
+
+    return '\n'.join(commands)
+
+
 def get_scram_arch(cmssw_release):
     """
     Get scram arch from

@@ -6,13 +6,12 @@ import os
 import imp
 import argparse
 #pylint: disable=import-error
-# Supplied by CMSSW environment
-from PSetTweaks.WMTweak import makeTweak
-from WMCore.Cache.WMConfigCache import ConfigCache
+from tweak_maker_lite import TweakMakerLite
+from config_cache_lite import ConfigCacheLite
 #pylint: enable=import-error
 
 
-def __load_config_file(file_path):
+def load_config_file(file_path):
     """
     Load a config module
     """
@@ -35,19 +34,14 @@ def upload_to_couch(cfg_file_name, label, user_name, group_name, database_url):
     if not os.path.exists(cfg_file_name):
         raise Exception('Can\'t locate config file %s.' % cfg_file_name)
 
-    loaded_config = __load_config_file(cfg_file_name)
-    database_name = 'reqmgr_config_cache'
-    config_cache = ConfigCache(database_url, database_name)
-    config_cache.createUserGroup(group_name, user_name)
-    try:
-        # Because now WMCore uses urllib.request.urlopen instead of urllib.urlopen
-        config_cache.addConfig('file://%s' % (cfg_file_name))
-    except Exception:
-        config_cache.addConfig(cfg_file_name)
-
-    config_cache.setPSetTweaks(makeTweak(loaded_config.process).jsondictionary())
-    config_cache.setLabel(label)
-    config_cache.setDescription(label)
+    loaded_config = load_config_file(cfg_file_name)
+    config_cache = ConfigCacheLite(database_url)
+    config_cache.set_user_group(user_name, group_name)
+    config_cache.add_config(cfg_file_name)
+    tweaks = TweakMakerLite().make(loaded_config.process)
+    config_cache.set_PSet_tweaks(tweaks)
+    config_cache.set_label(label)
+    config_cache.set_description(label)
     config_cache.save()
 
     print('DocID    %s %s' % (label, config_cache.document['_id']))
