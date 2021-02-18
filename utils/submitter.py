@@ -14,10 +14,11 @@ class Worker(Thread):
     A single worker thread that loops and submits requests from the queue
     """
 
-    def __init__(self, name, task_queue):
+    def __init__(self, name, worker_pool):
         Thread.__init__(self)
         self.name = name
-        self.queue = task_queue
+        self.worker_pool = worker_pool
+        self.queue = self.worker_pool.task_queue
         self.logger = logging.getLogger()
         self.logger.debug('Worker "%s" is being created', self.name)
         self.job_name = None
@@ -52,7 +53,10 @@ class Worker(Thread):
                     self.job_name = None
                     self.job_start_time = 0
             except Empty:
-                pass
+                # If there is nothing in the queue, stop running
+                self.running = False
+                # Stop existing
+                self.worker_pool.remove_worker(self)
 
     def join(self, timeout=None):
         self.running = False
@@ -65,11 +69,39 @@ class WorkerPool:
     Pool that contains all worker threads
     """
 
-    def __init__(self, workers_count, task_queue):
+    def __init__(self, max_workers, task_queue):
+        self.logger = logging.getLogger()
         self.workers = []
-        for i in range(workers_count):
-            worker = Worker(f'worker-{i}', task_queue)
+        self.max_workers = max_workers
+        self.task_queue = task_queue
+        self.worker_counter = 0
+
+    def add_task(self, name, function, *args, **kwargs):
+        """
+        Add a task to a queue
+        """
+        self.logger.info('Adding a task "%s". Queue size %s', name, self.get_queue_size())
+        self.task_queue.put((name, function, args, kwargs))
+        if len(self.workers) < self.max_workers:
+            worker = Worker(f'worker-{self.worker_counter}', self)
             self.workers.append(worker)
+            self.worker_counter += 1
+
+    def get_queue_size(self):
+        """
+        Return queue size
+        """
+        return self.task_queue.qsize()
+
+    def remove_worker(self, worker):
+        """
+        Remove worker from worker pool
+        """
+        self.logger.debug('Worker %s will be removed', worker.name)
+        self.workers.remove(worker)
+        if len(self.workers) == 0:
+            # If last worker is removed, reset IDs to 0
+            self.worker_counter = 0
 
     def get_worker_status(self):
         """
@@ -96,8 +128,8 @@ class Submitter:
     # If maxsize is less than or equal to zero, the queue size is infinite.
     __task_queue = Queue(maxsize=0)
     # All worker threads
-    __workers_count = 3
-    __worker_pool = WorkerPool(workers_count=__workers_count,
+    __max_workers = 15
+    __worker_pool = WorkerPool(max_workers=__max_workers,
                                task_queue=__task_queue)
 
     def __init__(self):
@@ -116,14 +148,13 @@ class Submitter:
             if worker_info['job_name'] == name:
                 raise Exception(f'Task "{name}" is being worked on by "{worker}"')
 
-        self.logger.info('Adding a task "%s". Queue size %s', name, self.get_queue_size())
-        Submitter.__task_queue.put((name, function, args, kwargs))
+        self.__worker_pool.add_task(name, function, *args, **kwargs)
 
     def get_queue_size(self):
         """
         Return size of submission queue
         """
-        return self.__task_queue.qsize()
+        return self.__worker_pool.get_queue_size()
 
     def get_worker_status(self):
         """
