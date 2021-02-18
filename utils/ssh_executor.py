@@ -21,6 +21,13 @@ class SSHExecutor():
         self.timeout = 3600
         self.max_retries = 3
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.close_connections()
+        return False
+
     def setup_ssh(self):
         """
         Initiate SSH connection and save it as self.ssh_client
