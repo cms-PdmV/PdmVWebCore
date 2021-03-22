@@ -29,6 +29,7 @@ def cmssw_setup(cmssw_release, reuse_cmssw=False):
 
     commands += [f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
                  f'cd {cmssw_release}/src',
+                 'CMSSW_SRC=$(pwd)',
                  'eval `scram runtime -sh`',
                  'cd $ORG_PWD']
 
