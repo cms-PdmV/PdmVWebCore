@@ -99,7 +99,7 @@ class WorkerPool:
         """
         self.logger.debug('Worker %s will be removed', worker.name)
         self.workers.remove(worker)
-        if len(self.workers) == 0:
+        if not self.workers:
             # If last worker is removed, reset IDs to 0
             self.worker_counter = 0
 

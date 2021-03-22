@@ -5,6 +5,7 @@ import logging
 from ..database.database import Database
 from ..model.model_base import ModelBase
 from ..utils.locker import Locker
+from ..utils.exceptions import ObjectNotFound, ObjectAlreadyExists
 
 
 class ControllerBase():
@@ -35,8 +36,7 @@ class ControllerBase():
 
         database = Database(self.database_name)
         if database.get(prepid):
-            raise Exception(f'Object with prepid "{prepid}" already '
-                            f'exists in {self.database_name} database')
+            raise ObjectAlreadyExists(prepid, self.database_name)
 
         with self.locker.get_lock(prepid):
             self.logger.info('Will create %s', (prepid))
@@ -53,16 +53,22 @@ class ControllerBase():
 
         return new_object
 
-    def get(self, prepid):
+    def get(self, prepid, deleted=False):
         """
         Return a single object if it exists in database
+        If deleted is True, return a deleted object
         """
         database = Database(self.database_name)
         object_json = database.get(prepid)
-        if object_json:
-            return self.model_class(json_input=object_json, check_attributes=False)
+        self.logger.info(object_json)
+        if not object_json:
+            raise ObjectNotFound(prepid)
 
-        return None
+        if not deleted and object_json.get('deleted'):
+            # Object existed, but was deleted
+            raise ObjectNotFound(prepid)
+
+        return self.model_class(json_input=object_json, check_attributes=False)
 
     def update(self, new_object, force_update=False):
         """
@@ -78,8 +84,7 @@ class ControllerBase():
             database = Database(self.database_name)
             old_object_json = database.get(prepid)
             if not old_object_json:
-                raise Exception(f'Object with prepid "{prepid}" does not '
-                                f'exist in {self.database_name} database')
+                raise ObjectNotFound(prepid)
 
             old_object = self.model_class(json_input=old_object_json, check_attributes=False)
             # Move over history, so it could not be overwritten
@@ -114,8 +119,7 @@ class ControllerBase():
         database = Database(self.database_name)
         json_data = database.get(prepid)
         if not json_data:
-            raise Exception(f'Object with prepid "{prepid}" does not '
-                            f'exist in {self.database_name} database')
+            raise ObjectNotFound(prepid)
 
         obj = self.model_class(json_input=json_data, check_attributes=False)
         with self.locker.get_nonblocking_lock(prepid, f'Deleting {prepid}'):

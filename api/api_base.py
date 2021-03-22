@@ -8,6 +8,7 @@ import time
 from flask import request, make_response
 from flask_restful import Resource
 from ..utils.user_info import UserInfo
+from ..utils.exceptions import ObjectNotFound, ObjectAlreadyExists
 
 
 class APIBase(Resource):
@@ -137,6 +138,12 @@ class APIBase(Resource):
         """
         if isinstance(exception, ImportError):
             return 500
+
+        if isinstance(exception, ObjectNotFound):
+            return 404
+
+        if isinstance(exception, ObjectAlreadyExists):
+            return 409
 
         return 400
 

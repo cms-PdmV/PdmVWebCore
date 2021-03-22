@@ -24,7 +24,7 @@ class SSHExecutor():
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, exc_value, exc_traceback):
         self.close_connections()
         return False
 
