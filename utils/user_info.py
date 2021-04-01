@@ -40,6 +40,10 @@ class UserInfo():
             return cached_value
 
         role_groups = Settings().get('roles')
+        for group in role_groups:
+            group['groups'] = set(group.get('groups', []))
+            group['users'] = set(group.get('users', []))
+
         self.__cache.set('role_groups', role_groups)
         return role_groups
 
@@ -57,7 +61,7 @@ class UserInfo():
             user_role = 'user'
             groups_set = set(groups)
             for role_group in reversed(self.__role_groups):
-                if not role_group.get('groups') or (set(role_group['groups']) & groups_set):
+                if (role_group['groups'] & groups_set) or (username in role_group['users']):
                     user_role = role_group['role']
                     break
 
