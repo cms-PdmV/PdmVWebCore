@@ -22,7 +22,9 @@ def cmssw_setup(cmssw_release, reuse_cmssw=False):
     Return code needed to set up CMSSW environment for given CMSSW release
     Basically, cmsrel and cmsenv commands
     """
-    commands = ['source /cvmfs/cms.cern.ch/cmsset_default.sh',
+    scram_arch = get_scram_arch(cmssw_release)
+    commands = [f'export SCRAM_ARCH={scram_arch}',
+                'source /cvmfs/cms.cern.ch/cmsset_default.sh',
                 'ORG_PWD=$(pwd)']
     if reuse_cmssw:
         commands += ['cd ..']
