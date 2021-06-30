@@ -16,11 +16,8 @@ class ModelBase():
     Has some convenience methods as well as somewhat smart setter
     Contains a bunch of sanity checks
     """
-    __json = {}
     __schema = {}
-    __model_name = None
     __logger = logging.getLogger()
-    __class_name = None
     default_lambda_checks = {}
     lambda_checks = {}
 

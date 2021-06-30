@@ -3,7 +3,9 @@ Module containing the functions necessary to interact with the wma.
 Credit and less than optimal code has to be spreaded among lots of people.
 '''
 import os
+#pylint: disable=deprecated-module
 import imp
+#pylint: enable=deprecated-module
 import argparse
 #pylint: disable=import-error
 from tweak_maker_lite import TweakMakerLite

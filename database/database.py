@@ -46,48 +46,48 @@ class Database():
 
         self.collection = self.client[collection_name]
 
-    @classmethod
-    def set_host_port(cls, host, port):
+    @staticmethod
+    def set_host_port(host, port):
         """
         Set global database hostname and port
         """
-        cls.__DATABASE_HOST = host
-        cls.__DATABASE_PORT = port
+        Database.__DATABASE_HOST = host
+        Database.__DATABASE_PORT = port
 
-    @classmethod
-    def set_database_name(cls, database_name):
+    @staticmethod
+    def set_database_name(database_name):
         """
         Set global database name
         """
-        cls.__DATABASE_NAME = database_name
+        Database.__DATABASE_NAME = database_name
 
-    @classmethod
-    def add_search_rename(cls, collection, value, renamed_value):
+    @staticmethod
+    def add_search_rename(collection, value, renamed_value):
         """
         Add a global rename rule to query method
         """
-        if collection not in cls.__SEARCH_RENAME:
-            cls.__SEARCH_RENAME[collection] = {}
+        if collection not in Database.__SEARCH_RENAME:
+            Database.__SEARCH_RENAME[collection] = {}
 
-        cls.__SEARCH_RENAME[collection][value] = renamed_value
+        Database.__SEARCH_RENAME[collection][value] = renamed_value
 
-    @classmethod
-    def set_credentials(cls, username, password):
+    @staticmethod
+    def set_credentials(username, password):
         """
         Set database username and password
         """
-        cls.__USERNAME = username
-        cls.__PASSWORD = password
+        Database.__USERNAME = username
+        Database.__PASSWORD = password
 
-    @classmethod
-    def set_credentials_file(cls, filename):
+    @staticmethod
+    def set_credentials_file(filename):
         """
         Load credentials from a JSON file
         """
         with open(filename) as json_file:
             credentials = json.load(json_file)
 
-        cls.set_credentials(credentials['username'], credentials['password'])
+        Database.set_credentials(credentials['username'], credentials['password'])
 
     def get_count(self):
         """

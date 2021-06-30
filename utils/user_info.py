@@ -16,26 +16,28 @@ class UserInfo():
     def __init__(self):
         self.__user = None
         self.__role_groups = self.__get_role_groups()
-        self.__roles = self.__get_roles()
+        self.__roles = self.__get_roles(self.__role_groups)
 
-    def __get_roles(self):
+    @classmethod
+    def __get_roles(cls, role_groups):
         """
         Return list of role names
         """
-        cached_value = self.__cache.get('roles')
+        cached_value = UserInfo.__cache.get('roles')
         if cached_value:
             return cached_value
 
-        roles = [x['role'] for x in self.__role_groups]
-        self.__cache.set('roles', roles)
+        roles = [x['role'] for x in role_groups]
+        UserInfo.__cache.set('roles', roles)
         return roles
 
-    def __get_role_groups(self):
+    @classmethod
+    def __get_role_groups(cls):
         """
         Return list of dictionaries where each dict has a "groups" list of e-groups
         and a "role" which is the role name
         """
-        cached_value = self.__cache.get('role_groups')
+        cached_value = UserInfo.__cache.get('role_groups')
         if cached_value:
             return cached_value
 
@@ -44,7 +46,7 @@ class UserInfo():
             group['groups'] = set(group.get('groups', []))
             group['users'] = set(group.get('users', []))
 
-        self.__cache.set('role_groups', role_groups)
+        UserInfo.__cache.set('role_groups', role_groups)
         return role_groups
 
     def get_user_info(self):
