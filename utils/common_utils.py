@@ -17,16 +17,20 @@ def clean_split(string, separator=','):
     return [x.strip() for x in string.split(separator) if x.strip()]
 
 
-def cmssw_setup(cmssw_release, reuse_cmssw=False):
+def cmssw_setup(cmssw_release, reuse=False, scram_arch=None):
     """
     Return code needed to set up CMSSW environment for given CMSSW release
     Basically, cmsrel and cmsenv commands
+    If reuse is set to True, this will checkout CMSSW in parent directory
+    If scram_arch is None, use default arch of CMSSW release
     """
-    scram_arch = get_scram_arch(cmssw_release)
+    if scram_arch is None:
+        scram_arch = get_scram_arch(cmssw_release)
+
     commands = [f'export SCRAM_ARCH={scram_arch}',
                 'source /cvmfs/cms.cern.ch/cmsset_default.sh',
                 'ORG_PWD=$(pwd)']
-    if reuse_cmssw:
+    if reuse:
         commands += ['cd ..']
 
     commands += [f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
