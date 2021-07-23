@@ -14,12 +14,12 @@ class Database():
     Database class represents a particular collection in MongoDB
     """
 
-    __DATABASE_HOST = 'localhost'
-    __DATABASE_PORT = 27017
-    __DATABASE_NAME = None
-    __SEARCH_RENAME = {}
-    __USERNAME = None
-    __PASSWORD = None
+    DATABASE_HOST = 'localhost'
+    DATABASE_PORT = 27017
+    DATABASE_NAME = None
+    SEARCH_RENAME = {}
+    USERNAME = None
+    PASSWORD = None
 
     def __init__(self, collection_name=None):
         """
@@ -27,22 +27,22 @@ class Database():
         """
         self.collection_name = collection_name
         self.logger = logging.getLogger()
-        db_host = os.environ.get('DB_HOST', Database.__DATABASE_HOST)
-        db_port = os.environ.get('DB_PORT', Database.__DATABASE_PORT)
-        if not Database.__DATABASE_NAME:
+        db_host = os.environ.get('DB_HOST', Database.DATABASE_HOST)
+        db_port = os.environ.get('DB_PORT', Database.DATABASE_PORT)
+        if not Database.DATABASE_NAME:
             raise Exception('Database name is not set')
 
-        if Database.__USERNAME and Database.__PASSWORD:
+        if Database.USERNAME and Database.PASSWORD:
             self.logger.debug('Using DB with username and password. DB: %s', collection_name)
             self.client = MongoClient(db_host,
                                       db_port,
-                                      username=Database.__USERNAME,
-                                      password=Database.__PASSWORD,
+                                      username=Database.USERNAME,
+                                      password=Database.PASSWORD,
                                       authSource='admin',
-                                      authMechanism='SCRAM-SHA-256')[Database.__DATABASE_NAME]
+                                      authMechanism='SCRAM-SHA-256')[Database.DATABASE_NAME]
         else:
             self.logger.debug('Using DB without username and password')
-            self.client = MongoClient(db_host, db_port)[Database.__DATABASE_NAME]
+            self.client = MongoClient(db_host, db_port)[Database.DATABASE_NAME]
 
         self.collection = self.client[collection_name]
 
@@ -51,33 +51,33 @@ class Database():
         """
         Set global database hostname and port
         """
-        Database.__DATABASE_HOST = host
-        Database.__DATABASE_PORT = port
+        Database.DATABASE_HOST = host
+        Database.DATABASE_PORT = port
 
     @staticmethod
     def set_database_name(database_name):
         """
         Set global database name
         """
-        Database.__DATABASE_NAME = database_name
+        Database.DATABASE_NAME = database_name
 
     @staticmethod
     def add_search_rename(collection, value, renamed_value):
         """
         Add a global rename rule to query method
         """
-        if collection not in Database.__SEARCH_RENAME:
-            Database.__SEARCH_RENAME[collection] = {}
+        if collection not in Database.SEARCH_RENAME:
+            Database.SEARCH_RENAME[collection] = {}
 
-        Database.__SEARCH_RENAME[collection][value] = renamed_value
+        Database.SEARCH_RENAME[collection][value] = renamed_value
 
     @staticmethod
     def set_credentials(username, password):
         """
         Set database username and password
         """
-        Database.__USERNAME = username
-        Database.__PASSWORD = password
+        Database.USERNAME = username
+        Database.PASSWORD = password
 
     @staticmethod
     def set_credentials_file(filename):
@@ -286,8 +286,8 @@ class Database():
 
         if not sort_attr:
             sort_attr = '_id'
-        elif sort_attr in Database.__SEARCH_RENAME.get(self.collection_name, {}):
-            sort_attr = Database.__SEARCH_RENAME[self.collection_name][sort_attr]
+        elif sort_attr in Database.SEARCH_RENAME.get(self.collection_name, {}):
+            sort_attr = Database.SEARCH_RENAME[self.collection_name][sort_attr]
 
         sort_attr = sort_attr.replace('<int>', '').replace('<float>', '').replace('<bool>', '')
         self.logger.debug('Database "%s" query dict %s', self.collection_name, query_dict)
@@ -309,8 +309,8 @@ class Database():
             split_part = part.split('=')
             key = split_part[0]
             value = split_part[1]
-            if key in Database.__SEARCH_RENAME.get(self.collection_name, {}):
-                key = Database.__SEARCH_RENAME[self.collection_name][key]
+            if key in Database.SEARCH_RENAME.get(self.collection_name, {}):
+                key = Database.SEARCH_RENAME[self.collection_name][key]
             elif isinstance(schema.get(key), (int, float, bool)):
                 key = f'{key}<{type(schema.get(key)).__name__}>'
 
