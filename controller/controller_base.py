@@ -1,6 +1,7 @@
 """
 Module that contains ControllerBase class
 """
+import json
 import logging
 from ..database.database import Database
 from ..model.model_base import ModelBase
@@ -60,7 +61,9 @@ class ControllerBase():
         """
         database = Database(self.database_name)
         object_json = database.get(prepid)
-        self.logger.info(object_json)
+        self.logger.debug('Fetched object for prepid %s: %s',
+                          prepid,
+                          json.dumps(object_json, indent=2))
         if not object_json:
             raise ObjectNotFound(prepid)
 
