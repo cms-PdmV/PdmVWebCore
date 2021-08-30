@@ -27,6 +27,9 @@ def cmssw_setup(cmssw_release, reuse=False, scram_arch=None):
     if scram_arch is None:
         scram_arch = get_scram_arch(cmssw_release)
 
+    if not scram_arch:
+        raise Exception(f'Could not find SCRAM arch of {cmssw_release}')
+
     commands = [f'export SCRAM_ARCH={scram_arch}',
                 'source /cvmfs/cms.cern.ch/cmsset_default.sh',
                 'ORG_PWD=$(pwd)']
