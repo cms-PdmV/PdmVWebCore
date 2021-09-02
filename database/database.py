@@ -224,12 +224,12 @@ class Database():
                 else:
                     if '*' in value:
                         if ignore_case:
-                            value = re.compile(value, re.IGNORECASE)
+                            value = re.compile(f'^{value}$', re.IGNORECASE)
 
                         value_or.append({key: {'$regex': value}})
                     else:
                         if ignore_case:
-                            value = re.compile(value, re.IGNORECASE)
+                            value = re.compile(f'^{value}$', re.IGNORECASE)
 
                         value_or.append({key: value})
 
