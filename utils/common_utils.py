@@ -1,10 +1,13 @@
 """
 Common utils
 """
+import json
 import xml.etree.ElementTree as XMLet
 from ..utils.cache import TimeoutCache
 from ..utils.connection_wrapper import ConnectionWrapper
 from ..utils.locker import Locker
+from ..utils.global_config import Config
+
 
 # Scram arch cache to save some requests to cmssdt.cern.ch
 __scram_arch_cache = TimeoutCache(3600)
@@ -101,3 +104,23 @@ def get_scram_arch(cmssw_release):
         __scram_arch_cache.set('releases', releases)
 
     return releases.get(cmssw_release)
+
+
+def dbs_datasetlist(dataset_name):
+    """
+    Query DBS datasetlist endpoint
+    """
+    grid_cert = Config.get('grid_user_cert')
+    grid_key = Config.get('grid_user_key')
+    dbs_conn = ConnectionWrapper(host='cmsweb-prod.cern.ch',
+                                 cert_file=grid_cert,
+                                 key_file=grid_key)
+    dbs_response = dbs_conn.api('POST',
+                                '/dbs/prod/global/DBSReader/datasetlist',
+                                {'dataset': dataset_name,
+                                 'detail': 1})
+    dbs_response = json.loads(dbs_response.decode('utf-8'))
+    if not dbs_response:
+        return None
+
+    return dbs_response
