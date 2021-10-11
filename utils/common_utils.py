@@ -115,12 +115,18 @@ def dbs_datasetlist(dataset_name):
     dbs_conn = ConnectionWrapper(host='cmsweb-prod.cern.ch',
                                  cert_file=grid_cert,
                                  key_file=grid_key)
+
+    if isinstance(dataset_name, list):
+        dataset_name = [ds.replace('das:', '', 1) for ds in dataset_name]
+    else:
+        dataset_name = dataset_name.replace('das:', '', 1)
+
     dbs_response = dbs_conn.api('POST',
                                 '/dbs/prod/global/DBSReader/datasetlist',
                                 {'dataset': dataset_name,
                                  'detail': 1})
     dbs_response = json.loads(dbs_response.decode('utf-8'))
-    if not dbs_response:
+    if not dbs_response and not isinstance(dataset_name, list):
         return None
 
     return dbs_response
