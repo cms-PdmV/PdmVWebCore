@@ -6,6 +6,7 @@ import logging
 import os
 import json
 import time
+import ssl
 
 
 class ConnectionWrapper():
@@ -26,14 +27,12 @@ class ConnectionWrapper():
         self.connection = None
         self.connection_attempts = max_attempts
         self.host_url = host.replace('https://', '').replace('http://', '')
-        self.cert_file = os.getenv('USERCRT', None)
-        self.key_file = os.getenv('USERKEY', None)
+        self.cert_file = cert_file or os.getenv('USERCRT', None)
+        self.key_file = key_file or os.getenv('USERKEY', None)
         self.timeout = timeout
         self.keep_open = keep_open
         self.port = port
         self.https = https
-        self.cert_file = cert_file
-        self.key_file = key_file
 
     def init_connection(self, url):
         """
@@ -44,7 +43,8 @@ class ConnectionWrapper():
                                                port=self.port,
                                                cert_file=self.cert_file,
                                                key_file=self.key_file,
-                                               timeout=self.timeout)
+                                               timeout=self.timeout,
+                                               context=ssl._create_unverified_context())
 
         return http.client.HTTPConnection(url,
                                           port=self.port,
