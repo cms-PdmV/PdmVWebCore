@@ -1,6 +1,7 @@
 """
 Common utils
 """
+import re
 import json
 import xml.etree.ElementTree as XMLet
 from ..utils.cache import TimeoutCache
@@ -13,11 +14,26 @@ from ..utils.global_config import Config
 __scram_arch_cache = TimeoutCache(3600)
 
 
-def clean_split(string, separator=','):
+def clean_split(string, separator=',', maxsplit=-1):
     """
     Split a string by separator and collect only non-empty values
     """
-    return [x.strip() for x in string.split(separator) if x.strip()]
+    return [x.strip() for x in string.split(separator, maxsplit) if x.strip()]
+
+
+def make_regex_matcher(pattern):
+    """
+    Compile a regex pattern and return a function that performs fullmatch on
+    given value
+    """
+    compiled_pattern = re.compile(pattern)
+    def matcher_function(value):
+        """
+        Return whether given value fully matches the pattern
+        """
+        return compiled_pattern.fullmatch(value) is not None
+
+    return matcher_function
 
 
 def cmssw_setup(cmssw_release, reuse=False, scram_arch=None):
@@ -106,27 +122,34 @@ def get_scram_arch(cmssw_release):
     return releases.get(cmssw_release)
 
 
-def dbs_datasetlist(dataset_name):
+def dbs_datasetlist(query):
     """
-    Query DBS datasetlist endpoint
+    Query DBS datasetlist endpoint with a query of list of datasets
+    List of datasets do not support wildcards
+    String query supports wildcards
     """
+    if not query:
+        return []
+
     grid_cert = Config.get('grid_user_cert')
     grid_key = Config.get('grid_user_key')
     dbs_conn = ConnectionWrapper(host='cmsweb-prod.cern.ch',
+                                 port=8443,
                                  cert_file=grid_cert,
                                  key_file=grid_key)
 
-    if isinstance(dataset_name, list):
-        dataset_name = [ds.replace('das:', '', 1) for ds in dataset_name]
+    if isinstance(query, list):
+        query = [(ds.replace('das:', '', 1) if ds.startswith('das:') else ds) for ds in query]
     else:
-        dataset_name = dataset_name.replace('das:', '', 1)
+        if query.startswith('das:'):
+            query = query.replace('das:', '', 1)
 
     dbs_response = dbs_conn.api('POST',
                                 '/dbs/prod/global/DBSReader/datasetlist',
-                                {'dataset': dataset_name,
+                                {'dataset': query,
                                  'detail': 1})
     dbs_response = json.loads(dbs_response.decode('utf-8'))
-    if not dbs_response and not isinstance(dataset_name, list):
-        return None
+    if not dbs_response:
+        return []
 
     return dbs_response
