@@ -139,10 +139,9 @@ def dbs_datasetlist(query):
                                  key_file=grid_key)
 
     if isinstance(query, list):
-        query = [(ds.replace('das:', '', 1) if ds.startswith('das:') else ds) for ds in query]
+        query = [ds[ds.index('/'):] for ds in query]
     else:
-        if query.startswith('das:'):
-            query = query.replace('das:', '', 1)
+        query = query[query.index('/'):]
 
     dbs_response = dbs_conn.api('POST',
                                 '/dbs/prod/global/DBSReader/datasetlist',
