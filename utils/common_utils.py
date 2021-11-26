@@ -36,12 +36,13 @@ def make_regex_matcher(pattern):
     return matcher_function
 
 
-def cmssw_setup(cmssw_release, reuse=False, scram_arch=None):
+def cmssw_setup(cmssw_release, scram_arch=None):
     """
     Return code needed to set up CMSSW environment for given CMSSW release
     Basically, cmsrel and cmsenv commands
     If reuse is set to True, this will checkout CMSSW in parent directory
     If scram_arch is None, use default arch of CMSSW release
+    Releases are put to <scram arch>/<release name> directory
     """
     if scram_arch is None:
         scram_arch = get_scram_arch(cmssw_release)
@@ -51,15 +52,14 @@ def cmssw_setup(cmssw_release, reuse=False, scram_arch=None):
 
     commands = [f'export SCRAM_ARCH={scram_arch}',
                 'source /cvmfs/cms.cern.ch/cmsset_default.sh',
-                'ORG_PWD=$(pwd)']
-    if reuse:
-        commands += ['cd ..']
-
-    commands += [f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
-                 f'cd {cmssw_release}/src',
-                 'CMSSW_SRC=$(pwd)',
-                 'eval `scram runtime -sh`',
-                 'cd $ORG_PWD']
+                'ORG_PWD=$(pwd)',
+                f'mkdir -p {scram_arch}',
+                f'cd {scram_arch}',
+                f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
+                f'cd {cmssw_release}/src',
+                'CMSSW_SRC=$(pwd)',
+                'eval `scram runtime -sh`',
+                'cd $ORG_PWD']
 
     return '\n'.join(commands)
 
@@ -70,16 +70,8 @@ def config_cache_lite_setup(reuse_files=False):
     """
     commands = []
     repo = 'https://github.com/cms-PdmV/ConfigCacheLite.git'
-    if reuse_files:
-        commands += ['ORG_PWD=$(pwd)',
-                     'cd ..']
-
     commands += [f'if [ ! -r ConfigCacheLite ] ; then git clone --quiet {repo} ; fi',
                  'export PYTHONPATH=$(pwd)/ConfigCacheLite/:$PYTHONPATH']
-
-    if reuse_files:
-        commands += ['cd $ORG_PWD']
-
     return '\n'.join(commands)
 
 
