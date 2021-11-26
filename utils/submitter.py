@@ -176,22 +176,36 @@ class Submitter:
                    'Accept': 'application/json'}
 
         reqmgr_response = None
-        try:
-            # Submit job dictionary (ReqMgr2 JSON)
-            reqmgr_response = connection.api('POST',
-                                             '/reqmgr2/data/request',
-                                             job_dict,
-                                             headers)
-            self.logger.debug(reqmgr_response)
-            workflow_name = json.loads(reqmgr_response).get('result', [])[0].get('request')
-        except Exception as ex:
-            if reqmgr_response:
-                error_message = str(reqmgr_response).replace('\\n', '\n')
-            else:
-                error_message = str(ex)
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Submit job dictionary (ReqMgr2 JSON)
+                reqmgr_response = connection.api('POST',
+                                                '/reqmgr2/data/request',
+                                                job_dict,
+                                                headers)
+                self.logger.debug(reqmgr_response)
+                workflow_name = json.loads(reqmgr_response).get('result', [])[0].get('request')
+                break
+            except Exception as ex:
+                if reqmgr_response:
+                    error_message = str(reqmgr_response).replace('\\n', '\n')
+                else:
+                    error_message = str(ex)
 
-            prepid = job_dict.get('PrepID')
-            raise Exception(f'Error submitting {prepid} to ReqMgr2:\n{error_message}')
+                prepid = job_dict.get('PrepID')
+                if attempt < max_attempts:
+                    # Ugly hacks because WMCore has a bug
+                    if ('Invalid spec parameter value: int()' in error_message
+                        or 'a number is required, not NoneType' in error_message):
+                        sleep = (attempt + 1)**3
+                        self.logger.warning('Response with "Invalid spec parameter value: int()", '
+                                            'sleep for %ss and try %s again...', sleep, prepid)
+                        time.sleep(sleep)
+                        self.logger.info('Trying to submit %s job dict again', prepid)
+                        continue
+
+                raise Exception(f'Error submitting {prepid} to ReqMgr2:\n{error_message}')
 
         return workflow_name
 
