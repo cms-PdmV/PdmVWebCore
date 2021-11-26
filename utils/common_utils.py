@@ -64,7 +64,7 @@ def cmssw_setup(cmssw_release, scram_arch=None):
     return '\n'.join(commands)
 
 
-def config_cache_lite_setup(reuse_files=False):
+def config_cache_lite_setup():
     """
     Return code needed to set up ConfigCacheLite and TweakMakerLite
     """
