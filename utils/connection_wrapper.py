@@ -1,61 +1,67 @@
 """
 Module that contains ConnectionWrapper class
 """
-import http.client
 import logging
 import os
 import json
 import time
 import ssl
+from http import client
 
 
 class ConnectionWrapper():
     """
-    HTTP client wrapper class to re-use existing connection
+    HTTP and HTTPS client wrapper class to re-use existing connection
+    Supports user certificate authentication
     """
 
     def __init__(self,
                  host,
-                 port=443,
-                 https=True,
-                 timeout=120,
-                 keep_open=False,
-                 max_attempts=3,
                  cert_file=None,
                  key_file=None):
         self.logger = logging.getLogger('logger')
         self.connection = None
-        self.connection_attempts = max_attempts
-        self.host_url = host.replace('https://', '').replace('http://', '')
+        host = host.rstrip('/')
+        self.https = host.startswith('https://')
+        self.host_url = host.replace('https://', '', 1).replace('http://', '', 1)
+        self.port = 443 if self.https else 80
+        if ':' in self.host_url:
+            host_port = self.host_url.rsplit(':', 1)
+            self.port = host_port[-1]
+            self.host_url = host_port[0]
+
+        self.logger.debug('Host: %s, port %s, https: %s', self.host_url, self.port, self.https)
         self.cert_file = cert_file or os.getenv('USERCRT', None)
         self.key_file = key_file or os.getenv('USERKEY', None)
-        self.timeout = timeout
-        self.keep_open = keep_open
-        self.port = port
-        self.https = https
+        self.connection_attempts = 3
+        self.timeout = 120
 
-    def init_connection(self, url):
+    def __enter__(self):
+        self.logger.debug('Entering context, host: %s', self.host_url)
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self.logger.debug('Exiting context, host: %s', self.host_url)
+        self.close()
+
+    def init_connection(self):
         """
-        Return a new HTTPSConnection
+        Return a new HTTPConnection or HTTPSConnection
         """
+        params = {'host': self.host_url,
+                  'port': self.port,
+                  'timeout': self.timeout}
+        if self.cert_file and self.key_file:
+            params['cert_file'] = self.cert_file
+            params['key_file'] = self.key_file
+
         if self.https:
-            return http.client.HTTPSConnection(url,
-                                               port=self.port,
-                                               cert_file=self.cert_file,
-                                               key_file=self.key_file,
-                                               timeout=self.timeout,
-                                               context=ssl._create_unverified_context())
-
-        return http.client.HTTPConnection(url,
-                                          port=self.port,
-                                          timeout=self.timeout)
-
-    def __refresh_connection(self, url):
-        """
-        Recreate a connection
-        """
-        self.logger.debug('Refreshing connection')
-        self.connection = self.init_connection(url)
+            self.logger.info('Creating HTTPS connection for %s', self.host_url)
+            params['context'] = ssl._create_unverified_context()
+            self.connection = client.HTTPSConnection(**params)
+        else:
+            self.logger.info('Creating HTTP connection for %s', self.host_url)
+            self.connection = client.HTTPConnection(**params)
 
     def close(self):
         """
@@ -71,36 +77,36 @@ class ConnectionWrapper():
         Make a HTTP request to given url
         """
         if not self.connection:
-            self.__refresh_connection(self.host_url)
+            self.init_connection()
 
-        all_headers = {"Accept": "application/json"}
+        all_headers = {}
+        if data and isinstance(data, dict):
+            all_headers.update({"Accept": "application/json"})
+            data = json.dumps(data) if data else None
+
         if headers:
             all_headers.update(headers)
 
         url = url.replace('#', '%23')
-        # this way saves time for creating connection per every request
-        for i in range(self.connection_attempts):
-            if i != 0:
-                self.logger.debug('Connection attempt number %s', i + 1)
+        for attempt in range(1, self.connection_attempts + 1):
+            if attempt != 1:
+                self.logger.debug('%s request to %s attempt %s', method, url, attempt)
 
             start_time = time.time()
             try:
                 self.connection.request(method,
                                         url,
-                                        json.dumps(data) if data else None,
+                                        body=data,
                                         headers=all_headers)
                 response = self.connection.getresponse()
                 response_to_return = response.read()
                 if response.status != 200:
-                    self.logger.error('Error %d while doing a %s to %s: %s',
+                    self.logger.error('Error %d while doing %s to %s: %s',
                                       response.status,
                                       method,
                                       url,
                                       response_to_return)
                     return response_to_return
-
-                if not self.keep_open:
-                    self.close()
 
                 end_time = time.time()
                 self.logger.debug('%s request to %s%s took %.2f',
@@ -109,16 +115,17 @@ class ConnectionWrapper():
                                   url,
                                   end_time - start_time)
                 return response_to_return
-            # except http.client.BadStatusLine:
-            #     raise RuntimeError('Something is really wrong')
             except Exception as ex:
                 self.logger.error('Exception while doing a %s to %s: %s',
                                   method,
                                   url,
                                   str(ex))
-                # most likely connection terminated
-                self.__refresh_connection(self.host_url)
+                if attempt < self.connection_attempts:
+                    sleep = attempt ** 3
+                    self.logger.debug('Will sleep for %s and retry')
+                    time.sleep(sleep)
 
-        self.logger.error('Connection wrapper failed after %d attempts',
-                          self.connection_attempts)
+                self.init_connection()
+
+        self.logger.error('Request failed after %d attempts', self.connection_attempts)
         return None

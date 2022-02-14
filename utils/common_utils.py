@@ -3,7 +3,10 @@ Common utils
 """
 import re
 import json
+import logging
 import xml.etree.ElementTree as XMLet
+
+from core_lib.utils.ssh_executor import SSHExecutor
 from ..utils.cache import TimeoutCache
 from ..utils.connection_wrapper import ConnectionWrapper
 from ..utils.locker import Locker
@@ -96,8 +99,9 @@ def get_scram_arch(cmssw_release):
         if cached_value:
             return cached_value
 
-        connection = ConnectionWrapper(host='cmssdt.cern.ch')
-        response = connection.api('GET', '/SDT/cgi-bin/ReleasesXML?anytype=1')
+        with ConnectionWrapper(host='https://cmssdt.cern.ch') as connection:
+            response = connection.api('GET', '/SDT/cgi-bin/ReleasesXML?anytype=1')
+
         root = XMLet.fromstring(response)
         releases = {}
         for architecture in root:
@@ -123,24 +127,163 @@ def dbs_datasetlist(query):
     if not query:
         return []
 
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
-    dbs_conn = ConnectionWrapper(host='cmsweb-prod.cern.ch',
-                                 port=8443,
-                                 cert_file=grid_cert,
-                                 key_file=grid_key)
 
     if isinstance(query, list):
         query = [ds[ds.index('/'):] for ds in query]
     else:
         query = query[query.index('/'):]
 
-    dbs_response = dbs_conn.api('POST',
-                                '/dbs/prod/global/DBSReader/datasetlist',
-                                {'dataset': query,
-                                 'detail': 1})
+    grid_cert = Config.get('grid_user_cert')
+    grid_key = Config.get('grid_user_key')
+    with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
+        dbs_response = dbs_conn.api('POST',
+                                    '/dbs/prod/global/DBSReader/datasetlist',
+                                    {'dataset': query,
+                                    'detail': 1})
+
     dbs_response = json.loads(dbs_response.decode('utf-8'))
     if not dbs_response:
         return []
 
     return dbs_response
+
+
+def dbs_dataset_runs(dataset):
+    """
+    Fetch a list of runs from DBS for a given dataset
+    """
+    if not dataset:
+        return []
+
+    grid_cert = Config.get('grid_user_cert')
+    grid_key = Config.get('grid_user_key')
+    with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
+        with Locker().get_lock('get-dataset-runs'):
+            dbs_response = dbs_conn.api('GET',
+                                        f'/dbs/prod/global/DBSReader/runs?dataset={dataset}')
+
+    dbs_response = json.loads(dbs_response.decode('utf-8'))
+    if not dbs_response:
+        return []
+
+    runs = dbs_response[0].get('run_num', [])
+    return runs
+
+
+def change_workflow_priority(workflow_names, priority):
+    """
+    Change priority of given list of workflow names
+    """
+    workflow_names = [w.strip() for w in workflow_names if w.strip()]
+    if not workflow_names:
+        return
+
+    logger = logging.getLogger('logger')
+    cmsweb_url = Config.get('cmsweb_url')
+    grid_cert = Config.get('grid_user_cert')
+    grid_key = Config.get('grid_user_key')
+    with ConnectionWrapper(cmsweb_url, grid_cert, grid_key) as cmsweb_connection:
+        for workflow in workflow_names:
+            logger.info('Changing "%s" priority to %s', workflow, priority)
+            response = cmsweb_connection.api('PUT',
+                                             f'/reqmgr2/data/request/{workflow}',
+                                             {'RequestPriority': priority})
+            logger.debug(response)
+
+
+def refresh_workflows_in_stats(workflow_names):
+    """
+    Force Stats2 to update workflows with given workflow names
+    """
+    workflow_names = [w.strip() for w in workflow_names if w.strip()]
+    if not workflow_names:
+        return
+
+    logger = logging.getLogger('logger')
+    credentials_file = Config.get('credentials_file')
+    commands = ['cd /home/pdmvserv/private',
+                'source setup_credentials.sh',
+                'cd /home/pdmvserv/Stats2']
+    commands += [f'python3 stats_update.py --action update --name {w}' for w in workflow_names]
+    logger.info('Will make Stats2 refresh these workflows: %s', ', '.join(workflow_names))
+    with Locker().get_lock('refresh-stats'):
+        with SSHExecutor('vocms074.cern.ch', credentials_file) as ssh_executor:
+            ssh_executor.execute_command(commands)
+
+    logger.info('Finished making Stats2 refresh workflows')
+
+
+def sort_workflows_by_name(workflows, name_attr):
+    """
+    Sort workflows by their submission date
+    """
+    return sorted(workflows, key=lambda w: '_'.join(w[name_attr].split('_')[-3:]))
+
+
+def get_workflows_from_stats_for_prepid(prepid):
+    """
+    Fetch workflows from Stats for given prepid
+    """
+    if not prepid:
+        return []
+
+    with ConnectionWrapper('http://vocms074.cern.ch:5984') as stats_conn:
+        workflows = stats_conn.api(
+            'GET',
+            f'/requests/_design/_designDoc/_view/prepids?key="{prepid}"&include_docs=True'
+        )
+
+    workflows = sort_workflows_by_name(workflows, 'RequestName')
+    return workflows
+
+
+def get_workflows_from_stats(workflow_names):
+    """
+    Fetch workflows from Stats with given names
+    """
+    workflow_names = [w.strip() for w in workflow_names if w.strip()]
+    if not workflow_names:
+        return []
+
+    with ConnectionWrapper('http://vocms074.cern.ch:5984') as stats_conn:
+        data = {'docs': [{'id': name} for name in workflow_names]}
+        results = stats_conn.api('POST', '/requests/_bulk_get', data).get('results', [])
+
+    workflows = [r['docs'][-1]['ok'] for r in results if r.get('docs') if r['docs'][-1].get('ok')]
+    workflows = sort_workflows_by_name(workflows, 'RequestName')
+    return results
+
+
+def cmsweb_reject_workflows(workflow_status_pairs):
+    """
+    Reject workflows in ReqMgr2
+    Function expects list of tuples where first item is workflow name and second
+    is current workflow status
+    """
+    cmsweb_url = Config.get('cmsweb_url')
+    grid_cert = Config.get('grid_user_cert')
+    grid_key = Config.get('grid_user_key')
+    headers = {'Content-type': 'application/json',
+               'Accept': 'application/json'}
+    logger = logging.getLogger('logger')
+    ignore_status = {'aborted', 'rejected', 'aborted-archived', 'rejected-archived'}
+    abort_status = {'assigned', 'staging', 'staged', 'acquired', 'running-open', 'running-closed'}
+    with ConnectionWrapper(cmsweb_url, grid_cert, grid_key) as connection:
+        for (name, status) in workflow_status_pairs:
+            if status in ignore_status:
+                continue
+
+            logger.info('%s status is %s', name, status)
+            # Depending on current status of workflow,
+            # it might need to be either aborted or rejected
+            if status in abort_status:
+                new_status = 'aborted'
+            else:
+                new_status = 'rejected'
+
+            logger.info('Will change %s status %s to %s', name, status, new_status)
+            response = connection.api('PUT',
+                                      f'/reqmgr2/data/request/{name}',
+                                      {'RequestStatus': new_status},
+                                      headers)
+            logger.debug(response)

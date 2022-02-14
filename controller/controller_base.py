@@ -251,7 +251,7 @@ class ControllerBase():
         elif isinstance(reference, list) and isinstance(target, list):
             # Comparing two lists
             if len(reference) != len(target):
-                changed_values.append(prefix.lstrip('.').lstrip('_'))
+                changed_values.append(prefix.lstrip('._'))
             else:
                 for i in range(min(len(reference), len(target))):
                     self.get_changes(reference[i],
@@ -261,7 +261,7 @@ class ControllerBase():
         else:
             # Comparing two values
             if reference != target:
-                changed_values.append(prefix.lstrip('.').lstrip('_'))
+                changed_values.append(prefix.lstrip('._'))
 
         return changed_values
 
