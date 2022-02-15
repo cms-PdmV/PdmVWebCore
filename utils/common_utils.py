@@ -228,11 +228,13 @@ def get_workflows_from_stats_for_prepid(prepid):
         return []
 
     with ConnectionWrapper('http://vocms074.cern.ch:5984') as stats_conn:
-        workflows = stats_conn.api(
+        response = stats_conn.api(
             'GET',
             f'/requests/_design/_designDoc/_view/prepids?key="{prepid}"&include_docs=True'
         )
 
+    response = json.loads(response.decode('utf-8'))
+    workflows = [x['doc'] for x in response['rows']]
     workflows = sort_workflows_by_name(workflows, 'RequestName')
     return workflows
 
@@ -245,13 +247,14 @@ def get_workflows_from_stats(workflow_names):
     if not workflow_names:
         return []
 
+    data = {'docs': [{'id': name} for name in workflow_names]}
     with ConnectionWrapper('http://vocms074.cern.ch:5984') as stats_conn:
-        data = {'docs': [{'id': name} for name in workflow_names]}
-        results = stats_conn.api('POST', '/requests/_bulk_get', data).get('results', [])
+        response = stats_conn.api('POST', '/requests/_bulk_get', data)
 
-    workflows = [r['docs'][-1]['ok'] for r in results if r.get('docs') if r['docs'][-1].get('ok')]
+    response = json.loads(response.decode('utf-8')).get('results', [])
+    workflows = [r['docs'][-1]['ok'] for r in response if r.get('docs') if r['docs'][-1].get('ok')]
     workflows = sort_workflows_by_name(workflows, 'RequestName')
-    return results
+    return workflows
 
 
 def cmsweb_reject_workflows(workflow_status_pairs):
