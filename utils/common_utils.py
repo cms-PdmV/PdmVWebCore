@@ -139,7 +139,8 @@ def dbs_datasetlist(query):
         dbs_response = dbs_conn.api('POST',
                                     '/dbs/prod/global/DBSReader/datasetlist',
                                     {'dataset': query,
-                                    'detail': 1})
+                                     'detail': 1},
+                                    headers={'Content-type': 'application/json'})
 
     dbs_response = json.loads(dbs_response.decode('utf-8'))
     if not dbs_response:
@@ -160,13 +161,13 @@ def dbs_dataset_runs(dataset):
     with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
         with Locker().get_lock('get-dataset-runs'):
             dbs_response = dbs_conn.api('GET',
-                                        f'/dbs/prod/global/DBSReader/runs?dataset={dataset}')
+                                        f'/dbs/prod/global/DBSReader/runs?dataset={dataset}',
+                                        headers={'Content-type': 'application/json'})
 
     dbs_response = json.loads(dbs_response.decode('utf-8'))
     if not dbs_response:
         return []
 
-    logging.getLogger('logger').debug(dbs_response)
     runs = [r['run_num'] for r in dbs_response]
     return runs
 
