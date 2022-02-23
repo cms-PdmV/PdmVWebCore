@@ -166,7 +166,8 @@ def dbs_dataset_runs(dataset):
     if not dbs_response:
         return []
 
-    runs = dbs_response[0].get('run_num', [])
+    logging.getLogger('logger').debug(dbs_response)
+    runs = [r['run_num'] for r in dbs_response]
     return runs
 
 
