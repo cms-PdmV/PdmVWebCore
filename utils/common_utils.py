@@ -139,7 +139,8 @@ def dbs_datasetlist(query):
         dbs_response = dbs_conn.api('POST',
                                     '/dbs/prod/global/DBSReader/datasetlist',
                                     {'dataset': query,
-                                     'detail': 1},
+                                     'detail': 1,
+                                     'dataset_access_type': '*'},
                                     headers={'Content-type': 'application/json'})
 
     dbs_response = json.loads(dbs_response.decode('utf-8'))
