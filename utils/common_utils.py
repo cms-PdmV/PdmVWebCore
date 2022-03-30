@@ -43,7 +43,6 @@ def cmssw_setup(cmssw_release, scram_arch=None):
     """
     Return code needed to set up CMSSW environment for given CMSSW release
     Basically, cmsrel and cmsenv commands
-    If reuse is set to True, this will checkout CMSSW in parent directory
     If scram_arch is None, use default arch of CMSSW release
     Releases are put to <scram arch>/<release name> directory
     """
@@ -293,3 +292,54 @@ def cmsweb_reject_workflows(workflow_status_pairs):
                                       {'RequestStatus': new_status},
                                       headers)
             logger.debug(response)
+
+
+def run_commands_in_singularity(commands, scram_arch, script_name=None):
+    """
+    Dump given commands to a script file and run it in a singularity container
+    """
+    if not script_name:
+        script_name = 'singularity-script'
+
+    script_name = script_name.replace(' ', '-')
+    bash = [f'# Dump code to {script_name}.sh file that can be run in Singularity',
+            f'cat <<\'SingularityScriptFile\' > {script_name}.sh',
+            '#!/bin/bash',
+            '']
+    if isinstance(commands, list):
+        bash += commands.strip()
+    else:
+        bash += [commands.strip()]
+
+    container_os = scram_arch.split('_')[0]
+    if container_os == 'slc7':
+        container_os = 'cc7'
+
+    bash += ['',
+             f'# End of {script_name}.sh file',
+             'SingularityScriptFile',
+             '',
+             '# Make file executable',
+             f'chmod +x {script_name}.sh',
+             '']
+
+    container_path = '/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw'
+    bash += [f'if [ -e "{container_path}/{container_os}:amd64-latest" ]; then',
+             f'  CONTAINER_NAME={container_os}:amd64-latest',
+             f'elif [ -e "{container_path}/{container_os}:x86_64-latest" ]; then',
+             f'  CONTAINER_NAME={container_os}:x86_64-latest',
+             'else',
+             f'  echo "Could not find amd64 or x86_64 for {container_os}"',
+             f'  ls -l {container_path}/{container_os}:*-latest',
+             '  exit 1',
+             'fi',
+             'echo "Using singularity container $CONTAINER_NAME"',
+             '']
+
+    singularity = 'singularity run -B /afs -B /cvmfs -B /eos -B /etc/grid-security --home $PWD:$PWD '
+    singularity += f'{container_path}/$CONTAINER_NAME'
+
+    singularity += f' $(pwd)/{script_name}.sh'
+    bash += [singularity]
+
+    return bash
