@@ -4,8 +4,8 @@ Module that handles all SSH operations - both ssh and ftp
 import json
 import time
 import logging
-import paramiko
 from io import BytesIO
+import paramiko
 
 
 class SSHExecutor():

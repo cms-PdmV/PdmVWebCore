@@ -319,16 +319,15 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
     if container_os == 'slc7':
         container_os = 'cc7'
 
+    container_path = '/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw'
     bash += ['',
              f'# End of {script_name}.sh file',
              'SingularityScriptFile',
              '',
              '# Make file executable',
              f'chmod +x {script_name}.sh',
-             '']
-
-    container_path = '/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw'
-    bash += [f'if [ -e "{container_path}/{container_os}:amd64-latest" ]; then',
+             '',
+             f'if [ -e "{container_path}/{container_os}:amd64-latest" ]; then',
              f'  CONTAINER_NAME={container_os}:amd64-latest',
              f'elif [ -e "{container_path}/{container_os}:amd64" ]; then',
              f'  CONTAINER_NAME={container_os}:amd64',
@@ -343,13 +342,12 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
              'fi',
              'echo "Using singularity container $CONTAINER_NAME"',
              'export SINGULARITY_CACHEDIR="/tmp/$(whoami)/singularity"',
-             '']
-
-    singularity = 'singularity run -B /afs -B /cvmfs -B /eos -B /etc/grid-security --home $PWD:$PWD '
-    singularity += f'{container_path}/$CONTAINER_NAME'
-
-    singularity += f' $(pwd)/{script_name}.sh'
-    bash += [singularity]
+             '',
+             ('singularity run '
+              '-B /afs -B /cvmfs -B /eos -B /etc/grid-security '
+              '--home $PWD:$PWD '
+              f'{container_path}/$CONTAINER_NAME'
+              f' $(pwd)/{script_name}.sh')]
 
     return bash
 
