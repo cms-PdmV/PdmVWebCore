@@ -4,6 +4,7 @@ Common utils
 import re
 import json
 import logging
+import hashlib
 import xml.etree.ElementTree as XMLet
 
 from core_lib.utils.ssh_executor import SSHExecutor
@@ -55,8 +56,8 @@ def cmssw_setup(cmssw_release, scram_arch=None):
     commands = [f'export SCRAM_ARCH={scram_arch}',
                 'source /cvmfs/cms.cern.ch/cmsset_default.sh',
                 'ORG_PWD=$(pwd)',
-                f'mkdir -p {scram_arch}',
-                f'cd {scram_arch}',
+                'mkdir -p $SCRAM_ARCH',
+                'cd $SCRAM_ARCH',
                 f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
                 f'cd {cmssw_release}/src',
                 'CMSSW_SRC=$(pwd)',
@@ -307,11 +308,14 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
             '#!/bin/bash',
             '']
     if isinstance(commands, list):
-        bash += commands.strip()
+        while commands and not commands[-1]:
+            commands = commands[:-1]
+
+        bash += commands
     else:
         bash += [commands.strip()]
 
-    container_os = scram_arch.split('_')[0]
+    container_os = clean_split(scram_arch, '_')[0]
     if container_os == 'slc7':
         container_os = 'cc7'
 
@@ -326,14 +330,19 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
     container_path = '/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw'
     bash += [f'if [ -e "{container_path}/{container_os}:amd64-latest" ]; then',
              f'  CONTAINER_NAME={container_os}:amd64-latest',
+             f'elif [ -e "{container_path}/{container_os}:amd64" ]; then',
+             f'  CONTAINER_NAME={container_os}:amd64',
              f'elif [ -e "{container_path}/{container_os}:x86_64-latest" ]; then',
              f'  CONTAINER_NAME={container_os}:x86_64-latest',
+             f'elif [ -e "{container_path}/{container_os}:x86_64" ]; then',
+             f'  CONTAINER_NAME={container_os}:x86_64',
              'else',
              f'  echo "Could not find amd64 or x86_64 for {container_os}"',
-             f'  ls -l {container_path}/{container_os}:*-latest',
+             f'  ls -l {container_path}/{container_os}:*',
              '  exit 1',
              'fi',
              'echo "Using singularity container $CONTAINER_NAME"',
+             'export SINGULARITY_CACHEDIR="/tmp/$(whoami)/singularity"',
              '']
 
     singularity = 'singularity run -B /afs -B /cvmfs -B /eos -B /etc/grid-security --home $PWD:$PWD '
@@ -343,3 +352,35 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
     bash += [singularity]
 
     return bash
+
+
+def run_commands_in_cmsenv(commands, cmssw_version, scram_arch):
+    """
+    Run given commands in CMS environment in an appropriate container if needed
+    """
+    os_name, _, gcc_version = clean_split(scram_arch, '_')
+    # Always use amd64 architecture
+    scram_arch = f'{os_name}_amd64_{gcc_version}'
+    # Add cms environment setup
+    setup = cmssw_setup(cmssw_version, scram_arch).split('\n')
+    if not isinstance(commands, list):
+        commands  = [commands.strip()]
+
+    commands = setup + [''] + commands
+    if os_name != 'slc7':
+        script_hash = get_hash(commands)
+        script_name = f'singularity-script-{script_hash}'
+        commands = run_commands_in_singularity(commands, scram_arch, script_name)
+
+    commands = '\n'.join(commands)
+    return commands
+
+
+def get_hash(data):
+    """
+    Get hash of given data
+    """
+    if isinstance(data, list):
+        data = '\n'.join(data)
+
+    return hashlib.md5(data.encode('utf-8')).hexdigest()
