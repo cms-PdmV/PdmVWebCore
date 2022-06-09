@@ -62,6 +62,11 @@ def cmssw_setup(cmssw_release, scram_arch=None):
                 f'cd {cmssw_release}/src',
                 'CMSSW_SRC=$(pwd)',
                 'eval `scram runtime -sh`',
+                'PYTHON_INT="python"',
+                'if [[ $(head -n 1 `which cmsDriver.py`) =~ "python3" ]]; then',
+                '  PYTHON_INT="python3"',
+                'fi',
+                'echo "Using "$PYTHON_INT interpreter',
                 'cd $ORG_PWD']
 
     return '\n'.join(commands)
