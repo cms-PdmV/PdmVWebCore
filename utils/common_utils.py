@@ -55,19 +55,28 @@ def cmssw_setup(cmssw_release, scram_arch=None):
 
     commands = [f'export SCRAM_ARCH={scram_arch}',
                 'source /cvmfs/cms.cern.ch/cmsset_default.sh',
-                'ORG_PWD=$(pwd)',
-                'mkdir -p $SCRAM_ARCH',
-                'cd $SCRAM_ARCH',
-                f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi',
-                f'cd {cmssw_release}/src',
-                'CMSSW_SRC=$(pwd)',
-                'eval `scram runtime -sh`',
-                'PYTHON_INT="python"',
-                'if [[ $(head -n 1 `which cmsDriver.py`) =~ "python3" ]]; then',
-                '  PYTHON_INT="python3"',
-                'fi',
-                'echo "Using "$PYTHON_INT interpreter',
-                'cd $ORG_PWD']
+                'ORG_PWD=$(pwd)']
+    if cmssw_release.startswith('/'):
+        # Path to CMSSW
+        commands += [f'if [ ! -r {cmssw_release}/src ] ; then',
+                     f'  echo "Cannot find {cmssw_release}/src"',
+                     f'  exit 1',
+                     'fi']
+    else:
+        # CMSSW release name
+        commands += ['mkdir -p $SCRAM_ARCH',
+                     'cd $SCRAM_ARCH',
+                     f'if [ ! -r {cmssw_release}/src ] ; then scram p CMSSW {cmssw_release} ; fi']
+
+    commands += [f'cd {cmssw_release}/src',
+                 'CMSSW_SRC=$(pwd)',
+                 'eval `scram runtime -sh`',
+                 'PYTHON_INT="python"',
+                 'if [[ $(head -n 1 `which cmsDriver.py`) =~ "python3" ]]; then',
+                 '  PYTHON_INT="python3"',
+                 'fi',
+                 'echo "Using "$PYTHON_INT interpreter',
+                 'cd $ORG_PWD']
 
     return '\n'.join(commands)
 
@@ -92,6 +101,7 @@ def get_scram_arch(cmssw_release):
     if not cmssw_release:
         return None
 
+    cmssw_release = cmssw_release.split('/')[-1]
     cached_releases = __scram_arch_cache.get('releases', {})
     cached_value = cached_releases.get(cmssw_release)
     if cached_value:
