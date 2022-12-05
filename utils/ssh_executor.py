@@ -1,10 +1,12 @@
 """
 Module that handles all SSH operations - both ssh and ftp
 """
+from io import BytesIO
+from paramiko.ssh_exception import AuthenticationException
+
 import json
 import time
 import logging
-from io import BytesIO
 import paramiko
 
 
@@ -33,21 +35,30 @@ class SSHExecutor():
         """
         Initiate SSH connection and save it as self.ssh_client
         """
-        self.logger.debug('Will set up ssh')
-        if self.ssh_client:
-            self.close_connections()
+        current_try = 1
+        while current_try <= self.max_retries:
+            try:
+                self.logger.debug('Will set up ssh, attempt %s of %s' % (current_try, self.max_retries))
+                if self.ssh_client:
+                    self.close_connections()
 
-        with open(self.credentials_file_path) as json_file:
-            credentials = json.load(json_file)
+                with open(self.credentials_file_path) as json_file:
+                    credentials = json.load(json_file)
 
-        self.logger.info('Credentials loaded successfully: %s', credentials['username'])
-        self.ssh_client = paramiko.SSHClient()
-        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.ssh_client.connect(self.remote_host,
-                                username=credentials["username"],
-                                password=credentials["password"],
-                                timeout=30)
-        self.logger.debug('Done setting up ssh')
+                self.logger.info('Credentials loaded successfully: %s', credentials['username'])
+                self.ssh_client = paramiko.SSHClient()
+                self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.ssh_client.connect(self.remote_host,
+                                        username=credentials["username"],
+                                        password=credentials["password"],
+                                        timeout=45)
+                self.logger.debug('Done setting up ssh')
+                return
+            except AuthenticationException as e:
+                if current_try == self.max_retries:
+                    self.logger.error(f"Max retries reached opening SSH connection")
+                    raise e
+                current_try += 1
 
     def setup_ftp(self):
         """
