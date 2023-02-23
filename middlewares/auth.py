@@ -271,21 +271,32 @@ class AuthenticationMiddleware:
     def __call__(self, request: Request, session: SessionMixin) -> None:
         """
         Validate the access token and force a token request if necessary.
-        :return None if there is a valid access token to authenticate the user
+        :return None if there is a valid access token to authenticate the user or if the user is
+        performing an authentication process.
+
         For more details, please see:
         https://flask.palletsprojects.com/en/2.2.x/api/?highlight=environ#flask.Flask.before_request
+
         Otherwise, it will redirect the user to sign in for an interactive authentication.
         """
+        if "oauth." in request.endpoint:
+            # The user is performing an authentication process
+            # This is usefull when you require to install the middleware
+            # on the top of the Flask application. @before_request function
+            # is called before any view, therefore, this could lead to infinite
+            # redirect loops.
+            return None
+
         user_data: dict = None
         user_data: dict | None = self.__retrieve_token_from_request(request=request)
         if user_data:
             session["user"] = user_data
-            return
+            return None
         # Check if authentication comes from a cookie session
         user_data: dict | None = self.__retrieve_token_from_session(session=session)
         if user_data:
             session["user"] = user_data
-            return
+            return None
 
         # Redirect to authentication endpoint:
         # Store this information inside the session
