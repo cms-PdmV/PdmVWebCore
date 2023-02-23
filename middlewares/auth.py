@@ -44,7 +44,12 @@ class AuthenticationMiddleware:
     )
 
     def __init__(
-        self, app: Flask, client_id: str, client_secret: str, valid_audiences: list[str]
+        self,
+        app: Flask,
+        client_id: str,
+        client_secret: str,
+        home_endpoint: str,
+        valid_audiences: list[str] = None,
     ):
         self.oidc_config: str = os.getenv(
             "REALM_OIDC_CONFIG", AuthenticationMiddleware.OIDC_CONFIG_DEFAULT
@@ -55,9 +60,12 @@ class AuthenticationMiddleware:
         self.jwt_regex_pattern: str = AuthenticationMiddleware.JWT_REGEX_PATTERN
         self.jwt_regex = re.compile(self.jwt_regex_pattern)
         self.app: Flask = self.__configure_session_cookie_security(app=app)
+        self.home_endpoint: str = home_endpoint
         self.client_id: str = client_id
         self.client_secret: str = client_secret
-        self.valid_audiences: list[str] = valid_audiences
+        self.valid_audiences: list[str] = (
+            [self.client_id] if valid_audiences is None else valid_audiences
+        )
         self.jwk: jwt.PyJWK = self.__retrieve_jwk()
         self.oauth_client: OAuth = self.__register_oauth_client()
         self.oauth_blueprint: Blueprint = self.__register_blueprint()
@@ -76,10 +84,15 @@ class AuthenticationMiddleware:
         stores the access and refresh tokens inside a cookie handled by the Flask.
         Also, this endpoint redirects the user back to its original destination.
         """
-        token = self.oauth_client.cern.authorize_access_token()
-        session["token"] = token
-        original_destination: str = session.pop("next", default="/")
-        return redirect(original_destination)
+        try:
+            token = self.oauth_client.cern.authorize_access_token()
+            session["token"] = token
+            original_destination: str = session.pop(
+                "next", default=url_for(self.home_endpoint)
+            )
+            return redirect(original_destination)
+        except Exception:
+            return redirect(url_for(self.home_endpoint))
 
     def __configure_session_cookie_security(self, app: Flask) -> Flask:
         """
@@ -279,7 +292,8 @@ class AuthenticationMiddleware:
 
         Otherwise, it will redirect the user to sign in for an interactive authentication.
         """
-        if "oauth." in request.endpoint:
+        valid_auth_endpoints = ("oauth.auth", "oauth.callback")
+        if request.endpoint in valid_auth_endpoints:
             # The user is performing an authentication process
             # This is usefull when you require to install the middleware
             # on the top of the Flask application. @before_request function
