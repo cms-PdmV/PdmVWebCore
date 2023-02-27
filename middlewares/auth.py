@@ -86,7 +86,10 @@ class AuthenticationMiddleware:
         """
         try:
             token = self.oauth_client.cern.authorize_access_token()
-            session["token"] = token
+            session["token"] = {
+                "access_token": token["access_token"],
+                "refresh_token": token["refresh_token"],
+            }
             original_destination: str = session.pop(
                 "next", default=url_for(self.home_endpoint)
             )
