@@ -108,7 +108,7 @@ class AuthenticationMiddleware:
         :rtype: Flask
         """
         # Configure the session cookie
-        app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+        app.config["SESSION_COOKIE_SAMESITE"] = "None"
         app.config["SESSION_COOKIE_HTTPONLY"] = True
         app.config["SESSION_COOKIE_SECURE"] = True
         return app
