@@ -54,7 +54,7 @@ class ConnectionWrapper:
 
         if self.https:
             self.logger.info("Creating HTTPS connection for %s", self.host_url)
-            ssl_context = ssl.create_default_context()
+            ssl_context = ssl._create_unverified_context()
             ssl_context.set_ciphers("DEFAULT")
             params["context"] = ssl_context
             self.connection = client.HTTPSConnection(**params)
