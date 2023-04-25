@@ -359,7 +359,7 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
              'export SINGULARITY_CACHEDIR="/tmp/$(whoami)/singularity"',
              '',
              ('singularity run '
-              '-B /afs -B /cvmfs -B /eos -B /etc/grid-security '
+              '-B /afs -B /cvmfs -B /eos -B /etc/grid-security -B /etc/pki/ca-trust '
               '--home $PWD:$PWD '
               f'{container_path}/$CONTAINER_NAME'
               f' $(pwd)/{script_name}.sh')]
