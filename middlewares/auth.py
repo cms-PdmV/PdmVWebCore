@@ -183,7 +183,7 @@ class AuthenticationMiddleware:
             msg: str = f"Error validating access token - Details: {auth_error}"
             error: dict = {"msg": msg}
             response: Response = jsonify(error)
-            response.status_code = 403
+            response.status_code = 400
             logger.error(auth_error)
             raise HTTPException(
                 description="Error validating access token", response=response
@@ -310,7 +310,7 @@ class AuthenticationMiddleware:
         Raises:
             ExpiredSignatureError: If the JWT was request by the authorization server
                 but it has expired
-            HTTPException: HTTP 403 response (Forbidden) if the JWT was not signed by
+            HTTPException: HTTP 401 response (Unauthorized) if the JWT was not signed by
                 the authorization server, or if it was requested for another application.
                 This response is raised for the InvalidTokenError, for more details
                 please see: https://pyjwt.readthedocs.io/en/latest/api.html#exceptions
@@ -409,7 +409,7 @@ class AuthenticationMiddleware:
 
         If the provided JWT is not valid and the middleware has been configured to handle OIDC flow
         by itself (`enable_oidc_flow`), this will return a HTTP 302 response to start an interactive
-        authentication flow. Else, a HTTP 403 will be raised asking for a JWT to be provided into
+        authentication flow. Else, a HTTP 401 will be raised asking for a JWT to be provided into
         the Authorization header.
 
         This middleware and its `authenticate` method are intended to be used inside @before_request
@@ -427,7 +427,7 @@ class AuthenticationMiddleware:
                 to the OIDC authentication endpoint if `enable_oidc_flow` and
                 it is required to start the authentication flow
         Raises:
-            HTTPException: A HTTP 403 response if the middleware is not set to handle OIDC
+            HTTPException: A HTTP 401 response if the middleware is not set to handle OIDC
                 authentication flow by itself and no JWT was provided via HTTP Authorization header.
         """
         valid_auth_endpoints = ("oauth.auth", "oauth.callback")
@@ -465,7 +465,7 @@ class AuthenticationMiddleware:
             "that is valid because the current is expired"
         )
         response: Response = jsonify({"msg": msg})
-        response.status_code = 403
+        response.status_code = 401
         raise HTTPException(
             description="JWT checked via Authorization header is invalid",
             response=response,

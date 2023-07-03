@@ -11,9 +11,10 @@ import logging
 import json
 import requests
 import secrets
+from dataclasses import asdict
 from multiprocessing import Process
-from flask import Flask, Blueprint, session, request
-from middlewares.auth import AuthenticationMiddleware
+from flask import Flask, Blueprint, session, request, has_request_context
+from middlewares.auth import AuthenticationMiddleware, UserInfo
 
 
 class BaseTestCase(unittest.TestCase):
@@ -38,10 +39,14 @@ class BaseTestCase(unittest.TestCase):
 
     __REQUEST_SUCCESS__: dict[str, str] = {"msg": "Request successfully handled"}
     __TEST_ENDPOINT__: str = "/test"
+    __USER_ENDPOINT__: str = "/test/user"
     __WEB_SERVER_HEARTBEAT_ENDPONT__: str = "/"
     __WEB_SERVER_HEARTBEAT_RESPONSE__: dict[str, str] = {
         "msg": "Web server deployed sucessfully"
     }
+    __CERN_OAUTH_TOKEN_ENDPOINT: str = (
+        "https://auth.cern.ch/auth/realms/cern/api-access/token"
+    )
 
     def prepare_test(
         self,
@@ -60,8 +65,8 @@ class BaseTestCase(unittest.TestCase):
         self.app, self.auth = self.__create_test_flask_application(
             enable_oidc_flow=enable_oidc_flow
         )
-        self.expired_token: str = self.__retrieve_expired_token(
-            path="./tests/middlewares/static/expired.json"
+        self.invalid_token: str = self.__retrieve_invalid_token(
+            path="./tests/middlewares/static/invalid.json"
         )
         # Supress Werkzeug log messages
         server_log: logging.Logger = logging.getLogger("werkzeug")
@@ -132,6 +137,20 @@ class BaseTestCase(unittest.TestCase):
             """
             return BaseTestCase.__WEB_SERVER_HEARTBEAT_RESPONSE__
 
+        def __user_endpoint__() -> dict[str, str]:
+            """
+            Returns the user information available into the provided
+            JWT for a valid authenticated HTTP request
+
+            Returns:
+                dict[str, str]: User information available inside a token
+            """
+            if has_request_context():
+                user_info: UserInfo | None = session.get("user")
+                if user_info:
+                    return asdict(user_info)
+            return {}
+
         # Create test app and install the middleware
         app: Flask = Flask(__name__)
         app.config["SECRET_KEY"] = self.secret_key
@@ -145,6 +164,11 @@ class BaseTestCase(unittest.TestCase):
         # Create a submodule for the protected resource
         protected: Blueprint = Blueprint("protected", __name__)
         protected.add_url_rule(rule="/", endpoint="test", view_func=__test_endpoint__)
+        protected.add_url_rule(
+            rule=f"/{BaseTestCase.__USER_ENDPOINT__.split('/')[-1]}",
+            endpoint="user",
+            view_func=__user_endpoint__,
+        )
         # Configure the middleware before any HTTP request
         protected.before_request(
             lambda: auth.authenticate(request=request, flask_session=session)
@@ -162,13 +186,13 @@ class BaseTestCase(unittest.TestCase):
 
         return app, auth
 
-    def __retrieve_expired_token(self, path: str) -> str:
+    def __retrieve_invalid_token(self, path: str) -> str:
         """
-        Retrieve an expired JSON Web Token requested to the CERN Authorization Server
+        Retrieve an invalid JSON Web Token
         It will be useful to verify the functionality related to token validation
 
         Returns:
-            str: A expired JWT provided by CERN Authorization Server
+            str: An invalid JWT
 
         Raises:
             ValueError: If the retrieved token is empty
@@ -217,6 +241,27 @@ class BaseTestCase(unittest.TestCase):
                 self.server.kill()
             self.server = None
 
+    def __request_application_token(self) -> tuple[int, str]:
+        """
+        Request an application JWT to CERN Authorization Server
+
+        Returns:
+            int: HTTP Response status code
+            str: JWT retrieved from CERN Authorization Server
+        """
+        url_encoded_data: dict = {
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "audience": self.client_id,
+        }
+        response: requests.Response = requests.post(
+            url=BaseTestCase.__CERN_OAUTH_TOKEN_ENDPOINT, data=url_encoded_data
+        )
+        access_token: str = response.json().get("access_token", "")
+        status_code: int = response.status_code
+        return status_code, access_token
+
     def setUp(self) -> None:
         """
         Prepares all the test preconditions. For our context,
@@ -241,9 +286,134 @@ class BaseTestCase(unittest.TestCase):
         response is the same
         """
         endpoint: str = f"http://{self.host}:{self.port}{BaseTestCase.__WEB_SERVER_HEARTBEAT_ENDPONT__}"
-        dummy_response: dict = requests.get(url=endpoint).json()
+        response: requests.Response = requests.get(url=endpoint)
+        body: dict = response.json()
+        status_code: int = response.status_code
+
         self.assertEqual(
-            dummy_response,
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertEqual(
+            body,
             BaseTestCase.__WEB_SERVER_HEARTBEAT_RESPONSE__,
             msg="The dummy response is different than expected",
+        )
+
+    def test_empty_jwt(self) -> None:
+        """
+        In case no JWT is provided into the Authorization header. The
+        middleware must return a HTTP 401 response
+        """
+        endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        )
+        response: requests.Response = requests.get(url=endpoint)
+        body: dict = response.json()
+        expected_exception_msg: str = "Please provide a JWT"
+        exception_msg: str = body.get("msg", "")
+
+        self.assertEqual(
+            401,
+            response.status_code,
+            msg="The middleware should have return a HTTP 401 Response: Unauthorized",
+        )
+        self.assertIn(
+            expected_exception_msg,
+            exception_msg,
+            msg="The exception message is not the expected",
+        )
+
+    def test_request_token(self) -> None:
+        """
+        Check that we are able to properly request JWT
+        to the authorization server
+        """
+        status_code, access_token = self.__request_application_token()
+
+        self.assertEqual(
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertIsNotNone(
+            self.auth.jwt_regex.search(access_token),
+            msg="The HTTP does not have a valid formatted JWT",
+        )
+
+    def test_authenticated_resource(self) -> None:
+        """
+        Check access to a protected resource providing
+        an Authorization JWT
+        """
+        _, access_token = self.__request_application_token()
+        headers: dict = {"Authorization": access_token}
+        endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        )
+        response: requests.Response = requests.get(url=endpoint, headers=headers)
+        body: dict = response.json()
+        status_code: int = response.status_code
+
+        self.assertEqual(
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertEqual(
+            body,
+            BaseTestCase.__REQUEST_SUCCESS__,
+            msg="The dummy response is different than expected",
+        )
+
+    def test_invalid_token(self) -> None:
+        """
+        Verify that we receive a HTTP 401 response if we provide an invalid JWT
+        for authenticating to the application
+        """
+        access_token: str = self.invalid_token
+        headers: dict = {"Authorization": access_token}
+        endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        )
+        response: requests.Response = requests.get(url=endpoint, headers=headers)
+        body: dict = response.json()
+        status_code: int = response.status_code
+
+        self.assertEqual(
+            401, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertNotEqual(
+            body,
+            BaseTestCase.__REQUEST_SUCCESS__,
+            msg="The dummy response is different than expected",
+        )
+
+    def test_user_info(self) -> None:
+        """
+        Verifies the user information stored into the Flask session cookie
+        """
+        _, access_token = self.__request_application_token()
+        headers: dict = {"Authorization": access_token}
+        endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__USER_ENDPOINT__}"
+        )
+        response: requests.Response = requests.get(url=endpoint, headers=headers)
+        body: dict = response.json()
+        status_code: int = response.status_code
+        user_info: UserInfo = UserInfo(**body)
+        dummy_application_name: str = f"service-account-{self.client_id}"
+
+        self.assertEqual(
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertEqual(
+            user_info.username,
+            dummy_application_name,
+            msg="The application name into the token is not the expected",
+        )
+        self.assertEqual(
+            user_info.email,
+            user_info.username,
+            msg="The email included into application JWT must be the same as the username",
+        )
+        self.assertEqual(
+            "",
+            user_info.fullname,
+            msg="User fullname must be empty for application JWT",
         )
