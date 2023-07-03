@@ -3,7 +3,7 @@ This module implements an authentication middleware to
 enable OIDC authentication for Flask applications.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import re
 import jwt
@@ -58,7 +58,7 @@ class UserInfo:
     """
 
     username: str = ""
-    roles: list[str] = []
+    roles: list[str] = field(default_factory=list[str])
     email: str = ""
     given_name: str = ""
     family_name: str = ""
