@@ -1,36 +1,90 @@
 """
 This module implements an authentication middleware to
-register a client to handle OAuth 2.0 authentication requests.
+enable OIDC authentication for Flask applications.
 """
+
+from dataclasses import dataclass
 import os
 import re
 import jwt
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from authlib.integrations.flask_client import OAuth
 from werkzeug.exceptions import HTTPException
+from werkzeug.wrappers.response import Response
 from flask.sessions import SessionMixin
 from flask import (
     Flask,
     Blueprint,
     Request,
-    Response,
     session,
     redirect,
     url_for,
     jsonify,
 )
+from .logger import logger
+
+
+@dataclass(frozen=True)
+class UserInfo:
+    """
+    Store the user information available from a
+    JWT retrieved via CERN SSO authentication server
+
+    Attributes:
+        username (str): CERN username. This field stores the data
+            available under the "sub" claim into the JWT.
+        roles (list[str]): List of roles a user has for
+            an application. This field stores the data
+            available under the "cern_roles" claim into the JWT.
+        email (str): User's email. This field is going to be empty
+            if the parsed token is related to an application.
+            This field stores the data available
+            under the "email" claim into the JWT.
+        given_name (str): User's name.
+            This field is going to be empty
+            if the parsed token is related to an application.
+            This field stores the data available
+            under the "given_name" claim into the JWT.
+        given_name (str): User's last name.
+            This field is going to be empty
+            if the parsed token is related to an application.
+            This field stores the data available
+            under the "family_name" claim into the JWT.
+        fullname (str): User's fullname.
+            This field is going to be empty
+            if the parsed token is related to an application.
+            This field stores the data available
+            under the "fullname" claim into the JWT.
+    """
+
+    username: str = ""
+    roles: list[str] = []
+    email: str = ""
+    given_name: str = ""
+    family_name: str = ""
+    fullname: str = ""
 
 
 class AuthenticationMiddleware:
     """
-    This AuthenticationMiddleware sets OAuth 2.0 authentication for a Flask application
-    It handles the authentication by JWT access token and it is able to refresh
-    expired access tokens if a refresh token is available.
-    :param app: Flask application
-    :param client_id: OAuth 2.0 Application Client ID
-    :param client_secret: OAuth 2.0 Application Client Secret
-    :param valid_audiences: Authorized audiences (applications) whose tokens are
-                            accepted by the web server
+    This class sets OIDC authentication for a Flask application
+    By default, it will attempt to verify JWT provided by an OAuth2 proxy
+    like the standard CERN Auth Proxy.
+    Nevertheless, this component is also able to handle the OIDC flow itself
+    to include this authentication mechanism directly into the application.
+
+    Attributes:
+        app (Flask): Flask application to set this middleware
+        enable_oidc_flow (bool): If enabled, this will enable OIDC authentication
+            flow directly from the application. Else, this will only enable the middleware
+            to verify JWT received via Authorization header to
+        client_id (str | None): Expected consumer for the token. Requestor (application) whose
+            tokens are going to be accepted for this application.
+            If `enable_oidc_flow`, this value will be used into the OIDC flow for authenticating
+            this middleware against the IAM service to request tokens.
+        client_secret (str | None): Client secret used into the OIDC flow for authenticating this
+            middleware against the IAM service to request tokens. It is mandatory to provide
+            it if `enable_oidc_flow` is enabled
     """
 
     OIDC_CONFIG_DEFAULT: str = (
@@ -46,10 +100,9 @@ class AuthenticationMiddleware:
     def __init__(
         self,
         app: Flask,
-        client_id: str,
-        client_secret: str,
-        home_endpoint: str,
-        valid_audiences: list[str] = None,
+        enable_oidc_flow: bool = bool(os.getenv("ENABLE_OIDC_FLOW")),
+        client_id: str | None = os.getenv("CLIENT_ID"),
+        client_secret: str | None = os.getenv("CLIENT_SECRET"),
     ):
         self.oidc_config: str = os.getenv(
             "REALM_OIDC_CONFIG", AuthenticationMiddleware.OIDC_CONFIG_DEFAULT
@@ -59,30 +112,64 @@ class AuthenticationMiddleware:
         )
         self.jwt_regex_pattern: str = AuthenticationMiddleware.JWT_REGEX_PATTERN
         self.jwt_regex = re.compile(self.jwt_regex_pattern)
-        self.app: Flask = self.__configure_session_cookie_security(app=app)
-        self.home_endpoint: str = home_endpoint
-        self.client_id: str = client_id
-        self.client_secret: str = client_secret
-        self.valid_audiences: list[str] = (
-            [self.client_id] if valid_audiences is None else valid_audiences
-        )
-        self.jwk: jwt.PyJWK = self.__retrieve_jwk()
-        self.oauth_client: OAuth = self.__register_oauth_client()
-        self.oauth_blueprint: Blueprint = self.__register_blueprint()
+        self.client_id: str | None = client_id
+        self.client_secret: str | None = client_secret
+        self.enable_oidc_flow: bool = enable_oidc_flow
 
-    def __auth(self):
+        # Verify client_id value is set properly
+        if not self.client_id:
+            client_id_error_msg: str = (
+                "Client ID has not been set "
+                f"Provided value: {self.client_id} "
+                f"Type - {type(self.client_id)}"
+            )
+            raise ValueError(client_id_error_msg)
+
+        # Verify client_password is provided if `enable_oidc_flow`
+        if self.enable_oidc_flow and not self.client_secret:
+            client_secret_error_msg: str = (
+                "AuthenticationMiddleware is configured to handle "
+                "OIDC flow directly but no client secret "
+                "was provided "
+                f"Client secret received: {self.client_secret} "
+                f"Type - {type(self.client_secret)}"
+            )
+            raise ValueError(client_secret_error_msg)
+
+        self.valid_audiences: list[str] = [self.client_id]
+        self.app: Flask = self.__configure_session_cookie_security(app=app)
+        self.jwk: jwt.PyJWK = self.__retrieve_jwk()
+
+        # Enable OIDC flow if required
+        if self.enable_oidc_flow:
+            self.oauth_client: OAuth = self.__register_oauth_client()
+            self.oauth_blueprint: Blueprint = self.__register_blueprint()
+
+    def __auth(self) -> Response:
         """
-        This endpoint starts the communication with the OAuth 2.0 Authorization Server
+        This endpoint starts the OIDC authentication flow against the OAuth 2.0 Authorization Server
         to request an access and refresh token.
+
+        Returns:
+            flask.Response: HTTP 302 response to redirect the user to the authorization server
+                for login
         """
         redirect_uri: str = url_for("oauth.callback", _external=True)
         return self.oauth_client.cern.authorize_redirect(redirect_uri)
 
-    def __callback(self):
+    def __callback(self) -> Response:
         """
         This endpoint handles the callback from the OAuth 2.0 Authorization Server and
         stores the access and refresh tokens inside a cookie handled by the Flask.
         Also, this endpoint redirects the user back to its original destination.
+
+        Returns:
+            flask.Response | werkzeug.wrappers.response.Response: HTTP 302 redirection
+                to the original endpoint requested by the user. This also stores the
+                session JWT into cookies to authorize future requests to resources
+        Raises:
+            HTTPException: If there is an error validating the access token provided by the
+                authorization server. This step mainly prevents CSRF attacks
         """
         try:
             token = self.oauth_client.cern.authorize_access_token()
@@ -90,22 +177,31 @@ class AuthenticationMiddleware:
                 "access_token": token["access_token"],
                 "refresh_token": token["refresh_token"],
             }
-            original_destination: str = session.pop(
-                "next", default=url_for(self.home_endpoint)
-            )
+            original_destination: str = session.pop("next", default=url_for("/"))
             return redirect(original_destination)
-        except Exception:
-            return redirect(url_for(self.home_endpoint))
+        except Exception as auth_error:
+            msg: str = f"Error validating access token - Details: {auth_error}"
+            error: dict = {"msg": msg}
+            response: Response = jsonify(error)
+            response.status_code = 403
+            logger.error(auth_error)
+            raise HTTPException(
+                description="Error validating access token", response=response
+            ) from auth_error
 
     def __configure_session_cookie_security(self, app: Flask) -> Flask:
         """
         Restrict the access to the session cookie.
-        The session cookie is going to be used to store the JWT token to authenticate the user,
-        the user data decrypted and the next endpoint the user is going to be redirected after a successful authentication.
-        Based on Flask documentation, the session cookie is cryptographically signed when it is transmitted to the
-        client web browser. For more information, please see: https://flask.palletsprojects.com/en/2.2.x/quickstart/?highlight=session#sessions
-        :return: Flask application with session cookie security set
-        :rtype: Flask
+        A Flask session cookie is going to be used to store the JWT token to authenticate the user,
+        and the next endpoint which the user is going to be redirected
+        after a successful authentication.
+        Based on Flask documentation, the session cookie is cryptographically
+        signed when it is transmitted to the client web browser.
+        For more information, please see:
+        https://flask.palletsprojects.com/en/2.2.x/quickstart/?highlight=session#sessions
+
+        Returns:
+            Flask: Flask application with some cookie security policies configured
         """
         # Configure the session cookie
         app.config["SESSION_COOKIE_SAMESITE"] = "None"
@@ -116,10 +212,12 @@ class AuthenticationMiddleware:
     def __register_blueprint(self) -> Blueprint:
         """
         Register a submodule (blueprint) inside the Flask application to
-        handle OAuth authentication. The new submodule is registered under the
-        /oauth2 url prefix.
-        :return Flask submodule (blueprint)
-        :rtype Blueprint
+        include the authentication endpoint that handle OIDC authentication.
+        The new submodule is registered under the /oauth2 url prefix.
+
+        Returns:
+            flask.Blueprint: Submodule which provides HTTP endpoints to handle OIDC authentication
+                flow
         """
         oauth_blueprint = Blueprint("oauth", __name__)
         # Register views
@@ -135,10 +233,14 @@ class AuthenticationMiddleware:
 
     def __register_oauth_client(self) -> OAuth:
         """
-        Register the OAuth 2.0 Client into the Flask application used to build token claim
-        requests.
-        :return OAuth 2.0 Client
-        :rtype OAuth
+        Instantiates a OAuth 2.0 middleware into the Flask application
+        to handle OIDC authentication flow. Configure the middleware
+        to grab the standard configuration (from the well known endpoint)
+        provided by authorization server (by default, from CERN SSO Authorization server)
+
+        Returns:
+            authlib.integrations.flask_client.OAuth: OAuth2 middleware
+                to handle OIDC flow
         """
         # Set the client id and secret
         client_credentials: dict = {
@@ -162,48 +264,56 @@ class AuthenticationMiddleware:
 
     def __retrieve_jwk(self) -> jwt.PyJWK:
         """
-        Retrieve the public key from the OAuth 2.0 Authorization Server used to
+        Retrieve the public key from the OAuth 2.0 authorization server to
         validate JWT access token.
-        :return JWK to validate JWT access token
-        :rtype PyJWK
+
+        Returns:
+            jwt.PyJWK: JSON Web Key to validate a provided JWT
         """
         jwks_client = jwt.PyJWKClient(self.jwt_public_key_url)
         return jwks_client.get_signing_keys()[0]
 
-    def __token_to_user(self, decoded_token: dict) -> dict:
+    def __token_to_user(self, decoded_token: dict) -> UserInfo:
         """
-        Parse the user data included inside the JWT access token
-        and return the user information.
-        :return CERN user information
-        :rtype dict
-        """
-        username: str = decoded_token.get("sub")
-        roles: list[str] = decoded_token.get("cern_roles")
-        email: str = decoded_token.get("email")
-        given_name: str = decoded_token.get("given_name")
-        family_name: str = decoded_token.get("family_name")
-        fullname: str = decoded_token.get("name")
-        return {
-            "username": username,
-            "roles": roles,
-            "email": email,
-            "given_name": given_name,
-            "family_name": family_name,
-            "fullname": fullname,
-        }
+        Parse the user data available inside the JWT access token
+        and return a user information (UserInfo) data object.
 
-    def __decode_token(self, access_token: str) -> dict:
+        Returns:
+            UserInfo: User information retrieved from JWT
         """
-        Decodes a JWT access token and validates it using a JWK and the
-        valid audiences.
-        :raises ExpiredSignatureError: If the access token is expired
-        :raises HTTPException: If the access token was signed by an invalid provider,
-        if the token audience is not valid,
-        or if the claim dates are not valid
-        For more details, please see:
-        https://pyjwt.readthedocs.io/en/latest/api.html#exceptions
-        :return CERN user data included inside the JWT access token
-        :rtype dict
+        username: str = decoded_token.get("sub", "")
+        roles: list[str] = decoded_token.get("cern_roles", [])
+        email: str = decoded_token.get("email", username)
+        given_name: str = decoded_token.get("given_name", "")
+        family_name: str = decoded_token.get("family_name", "")
+        fullname: str = decoded_token.get("name", "")
+
+        return UserInfo(
+            username=username,
+            roles=roles,
+            email=email,
+            given_name=given_name,
+            family_name=family_name,
+            fullname=fullname,
+        )
+
+    def __decode_token(self, access_token: str) -> UserInfo | None:
+        """
+        Decodes a JWT access token and checks if the JWT is valid by using the authentication
+        server JWK and if the token was requested for the current application
+        (by checking its audience).
+
+        Returns:
+            None: If the access token provided does not match a JWT format
+            UserInfo: User's information retrieved from the provided JWT if this is valid
+
+        Raises:
+            ExpiredSignatureError: If the JWT was request by the authorization server
+                but it has expired
+            HTTPException: HTTP 403 response (Forbidden) if the JWT was not signed by
+                the authorization server, or if it was requested for another application.
+                This response is raised for the InvalidTokenError, for more details
+                please see: https://pyjwt.readthedocs.io/en/latest/api.html#exceptions
         """
         jwt_raw_token = self.jwt_regex.search(access_token)
         if jwt_raw_token:
@@ -217,6 +327,7 @@ class AuthenticationMiddleware:
                 )
                 return self.__token_to_user(decoded_token)
             except ExpiredSignatureError as expired_error:
+                logger.error(expired_error)
                 raise expired_error
             except InvalidTokenError as token_error:
                 msg: str = (
@@ -225,75 +336,99 @@ class AuthenticationMiddleware:
                 error: dict = {"error": msg}
                 response: Response = jsonify(error)
                 response.status_code = 401
-                raise HTTPException(description=msg, response=response)
+                logger.error(token_error)
+                raise HTTPException(description=msg, response=response) from token_error
 
         return None
 
-    def __retrieve_token_from_session(self, session: SessionMixin) -> dict | None:
+    def __retrieve_token_from_session(
+        self, flask_session: SessionMixin
+    ) -> UserInfo | None:
         """
-        Retrieves the access and refresh tokens from a cookie via Flask session.
-        Also, it attemps to refresh the access token if a refresh token is available
-        in case the access token has expired.
-        :return CERN user data included inside the JWT access token
-        :return None if there is no access token available inside the session cookie
-        or if there was an error while renewing the access token.
-        This None value indicates that an interactive authentication is required
-        :rtype dict | None
+        Retrieves the access token from the Flask session cookie.
+        If the access token is expired, both access and refresh tokens will be removed
+        from the Flask session cookie, this will force the authentication flow against the
+        authorization server.
+
+        Returns:
+            None: If it is required to start the authentication flow to the
+                authorization server. This happens if there is no access token and refresh token
+                available into the Flask session cookie or if the access token has expired
+            UserInfo: User's information parsed from the JWT available inside the session cookie
         """
-        session_cookie: dict = session.get("token")
+        session_cookie: dict | None = flask_session.get("token")
         if session_cookie:
-            access_token: str = session_cookie.get("access_token")
+            access_token: str | None = session_cookie.get("access_token", "")
             try:
-                user_info: dict | None = self.__decode_token(access_token=access_token)
-                return user_info
-            except ExpiredSignatureError:
-                # Try to refresh the token via refresh token claim
-                try:
-                    refresh_token: str = session_cookie.get("refresh_token")
-                    new_token: dict = self.oauth_client.cern.fetch_access_token(
-                        refresh_token=refresh_token, grant_type="refresh_token"
-                    )
-                    # Update the new token
-                    new_access_token: str = new_token.get("access_token")
-                    session["token"].update(new_token)
-                    return self.__decode_token(access_token=new_access_token)
-                except Exception:
-                    # Maybe the refresh token expired
-                    # Force an interactive authentication
-                    session.pop("token")
-                    return None
+                return (
+                    self.__decode_token(access_token=access_token)
+                    if access_token
+                    else None
+                )
+            except ExpiredSignatureError as exp_error:
+                # Current session has expired
+                # Delete the current token and ask the auth server
+                # to give you a new one
+                logger.error(
+                    "Session cookie has expired. Asking the auth server for a new one"
+                )
+                logger.error("Error: %s", exp_error)
+                flask_session.pop("token")
+                return None
         return None
 
-    def __retrieve_token_from_request(self, request: Request) -> dict | None:
+    def __retrieve_token_from_request(self, request: Request) -> UserInfo | None:
         """
-        Retrieves the access token from the Authorization header
-        then it validates the token and retrieve the user data available inside .
-        :return CERN user data included inside the JWT access token
-        :return None if there is no access token available inside the Authorization header
-        or if the access token is expired.
-        This None value indicates that an interactive authentication is required
-        :rtype dict | None
+        Retrieves the JWT (access token) provided via HTTP Authorization header
+        and checks that it is valid.
+
+        Returns:
+            None: If it is required to start the authentication flow to the
+                authorization server. This happens if there is no access token
+                provided via Authorization header or if the provided access token
+                is expired
+            UserInfo: User's information parsed from the JWT available inside the session cookie
         """
-        access_token = request.headers.get("Authorization")
+        access_token: str | None = request.headers.get("Authorization", "")
         if access_token:
             try:
                 return self.__decode_token(access_token=access_token)
             except ExpiredSignatureError:
-                # We are not able to retrieve a refresh token
-                # using the Authorization header
                 return None
         return None
 
-    def __call__(self, request: Request, session: SessionMixin) -> None:
+    def authenticate(
+        self, request: Request, flask_session: SessionMixin
+    ) -> Response | None:
         """
-        Validate the access token and force a token request if necessary.
-        :return None if there is a valid access token to authenticate the user or if the user is
-        performing an authentication process.
+        Checks, for every HTTP request, if the HTTP request is already authenticated
+        or if it requires authentication by looking for a valid JWT provided
+        via HTTP Authorization header or into Flask session cookie.
+        If the JWT is valid, the user information available inside of it will be parsed and stored
+        into the Flask session cookie under the key "user".
 
-        For more details, please see:
+        If the provided JWT is not valid and the middleware has been configured to handle OIDC flow
+        by itself (`enable_oidc_flow`), this will return a HTTP 302 response to start an interactive
+        authentication flow. Else, a HTTP 403 will be raised asking for a JWT to be provided into
+        the Authorization header.
+
+        This middleware and its `authenticate` method are intended to be used inside @before_request
+        Flask middleware function. For more details, please see:
         https://flask.palletsprojects.com/en/2.2.x/api/?highlight=environ#flask.Flask.before_request
 
-        Otherwise, it will redirect the user to sign in for an interactive authentication.
+        Args:
+            request (flask.Request): HTTP request to check if it is authenticated
+            flask_session (flask.SessionMixin): Flask session for the current request
+
+        Returns:
+            None: If the HTTP request has been succesfully authenticated and the requested
+                endpoint can be consumed.
+            flask.Response | werkzeug.wrappers.response.Response: HTTP 302 redirection
+                to the OIDC authentication endpoint if `enable_oidc_flow` and
+                it is required to start the authentication flow
+        Raises:
+            HTTPException: A HTTP 403 response if the middleware is not set to handle OIDC
+                authentication flow by itself and no JWT was provided via HTTP Authorization header.
         """
         valid_auth_endpoints = ("oauth.auth", "oauth.callback")
         if request.endpoint in valid_auth_endpoints:
@@ -304,21 +439,34 @@ class AuthenticationMiddleware:
             # redirect loops.
             return None
 
-        user_data: dict = None
-        user_data: dict | None = self.__retrieve_token_from_request(request=request)
+        user_data: UserInfo | None = None
+        user_data = self.__retrieve_token_from_request(request=request)
         if user_data:
-            session["user"] = user_data
-            return None
-        # Check if authentication comes from a cookie session
-        user_data: dict | None = self.__retrieve_token_from_session(session=session)
-        if user_data:
-            session["user"] = user_data
+            flask_session["user"] = user_data
             return None
 
-        # Redirect to authentication endpoint:
-        # Store this information inside the session
-        original_destination: str = request.url
-        session["next"] = original_destination
+        # Check if the middleware handles OIDC flow. If so, check the Flask session cookie
+        if self.enable_oidc_flow:
+            user_data = self.__retrieve_token_from_session(flask_session=flask_session)
+            if user_data:
+                flask_session["user"] = user_data
+                return None
 
-        redirect_uri: str = url_for(endpoint="oauth.auth")
-        return redirect(location=redirect_uri)
+            # JWT available into Flask session cookie is invalid
+            # Start the authentication flow
+            original_destination: str = request.url
+            flask_session["next"] = original_destination
+            redirect_uri: str = url_for(endpoint="oauth.auth")
+            return redirect(location=redirect_uri)
+
+        msg: str = (
+            "Please provide a JWT via Authorization header. "
+            "If a JWT was provided, please provide a JWT "
+            "that is valid because the current is expired"
+        )
+        response: Response = jsonify({"msg": msg})
+        response.status_code = 403
+        raise HTTPException(
+            description="JWT checked via Authorization header is invalid",
+            response=response,
+        )
