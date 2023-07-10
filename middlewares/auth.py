@@ -177,7 +177,7 @@ class AuthenticationMiddleware:
                 "access_token": token["access_token"],
                 "refresh_token": token["refresh_token"],
             }
-            original_destination: str = session.pop("next", default=url_for("/"))
+            original_destination: str = session.pop("next", "/")
             return redirect(original_destination)
         except Exception as auth_error:
             msg: str = f"Error validating access token - Details: {auth_error}"
@@ -206,7 +206,7 @@ class AuthenticationMiddleware:
         # Configure the session cookie
         app.config["SESSION_COOKIE_SAMESITE"] = "None"
         app.config["SESSION_COOKIE_HTTPONLY"] = True
-        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["SESSION_COOKIE_SECURE"] = False
         return app
 
     def __register_blueprint(self) -> Blueprint:

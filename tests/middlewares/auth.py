@@ -11,6 +11,9 @@ import logging
 import json
 import requests
 import secrets
+import time
+import subprocess
+from http.cookiejar import MozillaCookieJar
 from dataclasses import asdict
 from multiprocessing import Process
 from flask import Flask, Blueprint, session, request, has_request_context
@@ -19,10 +22,10 @@ from middlewares.auth import AuthenticationMiddleware, UserInfo
 
 class BaseTestCase(unittest.TestCase):
     """
-    This class implements the basic mechanisms for retriving the CLIENT_ID and CLIENT_SECRET
-    required for requesting tokens to the authorization server. Likewise, this class
-    handles the life cycle for a simple Flask server required to test the authentication
-    middleware
+    This class implements a base test case for implementing tests related to verify
+    JWT validation features and OIDC flow implementation for authentication middleware.
+    To achieve this, this class handles the life cycle for a simple Flask server that
+    expose some protected resources required to test the authentication middleware.
 
     Attributes:
         port (int): Application port for deploying the test application
@@ -47,6 +50,7 @@ class BaseTestCase(unittest.TestCase):
     __CERN_OAUTH_TOKEN_ENDPOINT: str = (
         "https://auth.cern.ch/auth/realms/cern/api-access/token"
     )
+    __ANOTHER_OAUTH_ENDPOINT__: str = "https://cms-pdmv.cern.ch/valdb"
 
     def prepare_test(
         self,
@@ -55,18 +59,31 @@ class BaseTestCase(unittest.TestCase):
         client_secret: str = os.getenv("CLIENT_SECRET", ""),
         enable_oidc_flow: bool = False,
     ):
-        self.host: str = "127.0.0.1"
+        self.host: str = "localhost"
         self.port: int = port
         self.client_id: str = client_id
         self.client_secret: str = client_secret
         self.secret_key: str = secrets.token_hex()
         self.__validate_environment()
         self.server: Process | None = None
-        self.app, self.auth = self.__create_test_flask_application(
+        self.app, self.auth = self._create_test_flask_application(
             enable_oidc_flow=enable_oidc_flow
         )
+        self.base_path: str = os.getcwd()
+        self.static_folder: str = f"{self.base_path}/tests/middlewares/static"
         self.invalid_token: str = self.__retrieve_invalid_token(
-            path="./tests/middlewares/static/invalid.json"
+            path=f"{self.static_folder}/invalid.json"
+        )
+        # Endpoints
+        self.test_endpoint: str = (
+            f"http://{self.host}:{self.port}"
+            f"{BaseTestCase.__WEB_SERVER_HEARTBEAT_ENDPONT__}"
+        )
+        self.protected_endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        )
+        self.user_endpoint: str = (
+            f"http://{self.host}:{self.port}{BaseTestCase.__USER_ENDPOINT__}"
         )
         # Supress Werkzeug log messages
         server_log: logging.Logger = logging.getLogger("werkzeug")
@@ -101,7 +118,7 @@ class BaseTestCase(unittest.TestCase):
             msg = "Please set a free port for deploying the web server"
             raise ValueError(msg)
 
-    def __create_test_flask_application(
+    def _create_test_flask_application(
         self, enable_oidc_flow: bool = False
     ) -> tuple[Flask, AuthenticationMiddleware]:
         """
@@ -174,7 +191,8 @@ class BaseTestCase(unittest.TestCase):
             lambda: auth.authenticate(request=request, flask_session=session)
         )
         app.register_blueprint(
-            blueprint=protected, url_prefix=BaseTestCase.__TEST_ENDPOINT__
+            blueprint=protected,
+            url_prefix=BaseTestCase.__TEST_ENDPOINT__,
         )
 
         # Install the heartbeat endpoint
@@ -207,7 +225,7 @@ class BaseTestCase(unittest.TestCase):
 
         return token
 
-    def __start_test_server(self) -> None:
+    def _start_test_server(self) -> None:
         """
         Starts the test web application to handle some test request
         to test the functionality
@@ -232,7 +250,7 @@ class BaseTestCase(unittest.TestCase):
             )
             self.server.start()
 
-    def __stop_test_server(self) -> None:
+    def _stop_test_server(self) -> None:
         """
         Stops the test web application that is currently running
         """
@@ -241,7 +259,7 @@ class BaseTestCase(unittest.TestCase):
                 self.server.kill()
             self.server = None
 
-    def __request_application_token(self) -> tuple[int, str]:
+    def _request_application_token(self) -> tuple[int, str]:
         """
         Request an application JWT to CERN Authorization Server
 
@@ -256,7 +274,8 @@ class BaseTestCase(unittest.TestCase):
             "audience": self.client_id,
         }
         response: requests.Response = requests.post(
-            url=BaseTestCase.__CERN_OAUTH_TOKEN_ENDPOINT, data=url_encoded_data
+            url=BaseTestCase.__CERN_OAUTH_TOKEN_ENDPOINT,
+            data=url_encoded_data,
         )
         access_token: str = response.json().get("access_token", "")
         status_code: int = response.status_code
@@ -269,7 +288,8 @@ class BaseTestCase(unittest.TestCase):
         """
         super(BaseTestCase, self).setUp()
         self.prepare_test()
-        self.__start_test_server()
+        self._start_test_server()
+        time.sleep(0.125)
 
     def tearDown(self) -> None:
         """
@@ -277,7 +297,8 @@ class BaseTestCase(unittest.TestCase):
         For our context, it shutdowns the test web application
         """
         super(BaseTestCase, self).tearDown()
-        self.__stop_test_server()
+        self._stop_test_server()
+        time.sleep(0.125)
 
     def test_web_application(self) -> None:
         """
@@ -285,8 +306,7 @@ class BaseTestCase(unittest.TestCase):
         Send a HTTP request to the test web application and verify that the sample
         response is the same
         """
-        endpoint: str = f"http://{self.host}:{self.port}{BaseTestCase.__WEB_SERVER_HEARTBEAT_ENDPONT__}"
-        response: requests.Response = requests.get(url=endpoint)
+        response: requests.Response = requests.get(url=self.test_endpoint)
         body: dict = response.json()
         status_code: int = response.status_code
 
@@ -299,15 +319,33 @@ class BaseTestCase(unittest.TestCase):
             msg="The dummy response is different than expected",
         )
 
+
+class JWTValidationTest(BaseTestCase):
+    """
+    This class check all the features related to validate an external
+    JWT received via Authorization middleware
+    """
+
+    def setUp(self) -> None:
+        """
+        Prepares all the test preconditions. For our context,
+        it will start the test web application
+        """
+        super(JWTValidationTest, self).setUp()
+
+    def tearDown(self) -> None:
+        """
+        Destroys all the created resources for running this test,
+        For our context, it shutdowns the test web application
+        """
+        super(JWTValidationTest, self).tearDown()
+
     def test_empty_jwt(self) -> None:
         """
         In case no JWT is provided into the Authorization header. The
         middleware must return a HTTP 401 response
         """
-        endpoint: str = (
-            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
-        )
-        response: requests.Response = requests.get(url=endpoint)
+        response: requests.Response = requests.get(url=self.protected_endpoint)
         body: dict = response.json()
         expected_exception_msg: str = "Please provide a JWT"
         exception_msg: str = body.get("msg", "")
@@ -328,7 +366,7 @@ class BaseTestCase(unittest.TestCase):
         Check that we are able to properly request JWT
         to the authorization server
         """
-        status_code, access_token = self.__request_application_token()
+        status_code, access_token = self._request_application_token()
 
         self.assertEqual(
             200, status_code, msg="The HTTP response has an invalid status code"
@@ -343,12 +381,11 @@ class BaseTestCase(unittest.TestCase):
         Check access to a protected resource providing
         an Authorization JWT
         """
-        _, access_token = self.__request_application_token()
+        _, access_token = self._request_application_token()
         headers: dict = {"Authorization": access_token}
-        endpoint: str = (
-            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        response: requests.Response = requests.get(
+            url=self.protected_endpoint, headers=headers
         )
-        response: requests.Response = requests.get(url=endpoint, headers=headers)
         body: dict = response.json()
         status_code: int = response.status_code
 
@@ -368,10 +405,9 @@ class BaseTestCase(unittest.TestCase):
         """
         access_token: str = self.invalid_token
         headers: dict = {"Authorization": access_token}
-        endpoint: str = (
-            f"http://{self.host}:{self.port}{BaseTestCase.__TEST_ENDPOINT__}"
+        response: requests.Response = requests.get(
+            url=self.protected_endpoint, headers=headers
         )
-        response: requests.Response = requests.get(url=endpoint, headers=headers)
         body: dict = response.json()
         status_code: int = response.status_code
 
@@ -388,12 +424,11 @@ class BaseTestCase(unittest.TestCase):
         """
         Verifies the user information stored into the Flask session cookie
         """
-        _, access_token = self.__request_application_token()
+        _, access_token = self._request_application_token()
         headers: dict = {"Authorization": access_token}
-        endpoint: str = (
-            f"http://{self.host}:{self.port}{BaseTestCase.__USER_ENDPOINT__}"
+        response: requests.Response = requests.get(
+            url=self.user_endpoint, headers=headers
         )
-        response: requests.Response = requests.get(url=endpoint, headers=headers)
         body: dict = response.json()
         status_code: int = response.status_code
         user_info: UserInfo = UserInfo(**body)
@@ -416,4 +451,176 @@ class BaseTestCase(unittest.TestCase):
             "",
             user_info.fullname,
             msg="User fullname must be empty for application JWT",
+        )
+
+
+class SessionCookieTest(BaseTestCase):
+    """
+    This class implements some validation to check features related to
+    OIDC flow handling directly by the application
+    """
+
+    def prepare_test(self):
+        """
+        Prepares the test case and enables OIDC flow for the middleware
+        """
+        super(SessionCookieTest, self).prepare_test(enable_oidc_flow=True)
+
+    def __package_available(self, package: str) -> bool:
+        """
+        Check, via shell execution, if a desired package is available into the runtime
+        environment.
+
+        Args:
+            package (str): Package to verify if exists
+
+        Returns:
+            bool: True if the package exists, False otherwise
+        """
+        result: subprocess.CompletedProcess = subprocess.run(
+            f"which {package}", shell=True
+        )
+        return result.returncode == 0
+
+    def __skip_cookie_tests(self) -> None:
+        """
+        Check if the runtime environment has the packages required to request
+        session cookies via Kerberos authentication. If the are not available,
+        this will skip all the test related with cookies and browser emulation
+        (by convention, this tests will include the string: sso_cookie into its name)
+        """
+        self.skip_sso_cookie_test: bool = False
+
+        # Is auth-get-sso-cookie package available?
+        cookie_package: str = "auth-get-sso-cookie"
+        cookie_package_available: bool = self.__package_available(
+            package=cookie_package
+        )
+        kerberos_available: bool = self.__package_available(
+            package="kinit"
+        ) and self.__package_available(package="klist")
+        if not cookie_package_available:
+            logging.warn(
+                "auth-get-sso-cookie package is not available, cookie test will be skipped"
+            )
+            self.skip_sso_cookie_test = True
+        if not kerberos_available:
+            logging.warn("Kerberos is not available, cookie test will be skipped")
+            self.skip_sso_cookie_test = True
+
+    def __request_sso_cookie(self, url: str | None = None) -> MozillaCookieJar:
+        """
+        Request a SSO cookie using auth-get-sso-cookie
+        package for the test nginx middleware server.
+        Please be sure to use the kerberos credentials for an account
+        allowed by the application and for an account that does not
+        have multifactor authentication enabled.
+
+        Args:
+            url: URL to request a session cookie. If this value is not provided
+                the default `self.start_endpoint` will be used
+
+        Returns:
+            MozillaCookieJar: Cookies to authenticate to the
+                middleware
+
+        Raises:
+            CalledProcessError: If there is an issue requesting the cookie
+                to the SSO server
+        """
+        url = self.protected_endpoint if not url else url
+        cookie_path: str = f"{self.static_folder}/cookie.txt"
+        command: str = f"auth-get-sso-cookie -u {url} -o {cookie_path}"
+        _: subprocess.CompletedProcess = subprocess.run(command, shell=True, check=True)
+        cookie: MozillaCookieJar = MozillaCookieJar(filename=cookie_path)
+        cookie.load()
+        delete_cookie: str = f"rm -f {cookie_path}"
+        _ = subprocess.run(delete_cookie, shell=True, check=True)
+        return cookie
+
+    def setUp(self) -> None:
+        """
+        Prepares all the test preconditions. For our context,
+        it will start the test web application
+        """
+        super(BaseTestCase, self).setUp()
+        self.prepare_test()
+        self.__skip_cookie_tests()
+        self._start_test_server()
+        time.sleep(0.125)
+
+    def tearDown(self) -> None:
+        """
+        Destroys all the created resources for running this test,
+        For our context, it shutdowns the test web application
+        """
+        super(SessionCookieTest, self).tearDown()
+
+    def test_request_sso_cookie(self) -> None:
+        """
+        Check that we are able to request sso cookies for
+        the desired application
+        """
+        if self.skip_sso_cookie_test:
+            raise unittest.SkipTest("CERN Auth CLI packages are not available")
+        try:
+            cookie: MozillaCookieJar = self.__request_sso_cookie()
+            self.assertIsNotNone(cookie, msg="Cookie object is None")
+        except subprocess.CalledProcessError as shell_error:
+            logging.error("Error generating cookie: ", shell_error)
+            self.assertTrue(False, msg="There was an error generating the SSO cookie")
+
+    def test_valid_request_sso_cookie(self) -> None:
+        """
+        Check that a request providing a valid SSO cookie is accepted
+        """
+        if self.skip_sso_cookie_test:
+            raise unittest.SkipTest("CERN Auth CLI packages are not available")
+
+        access_cookie: MozillaCookieJar = self.__request_sso_cookie()
+        response: requests.Response = requests.get(
+            url=self.protected_endpoint, cookies=access_cookie
+        )
+        status_code: int = response.status_code
+        body: dict = response.json()
+        self.assertEqual(
+            200,
+            status_code,
+            msg="Request should have been accepted but it was denied",
+        )
+        self.assertEqual(
+            body,
+            BaseTestCase.__REQUEST_SUCCESS__,
+            msg="The dummy response is different than expected",
+        )
+
+    def test_invalid_request_sso_cookie(self) -> None:
+        """
+        Check that if a session cookie that belongs to another service is sent,
+        the middleware starts automatically the process to retrieve a valid session cookie
+        for the user and the desired page
+        """
+        if self.skip_sso_cookie_test:
+            raise unittest.SkipTest("CERN Auth CLI packages are not available")
+
+        access_cookie: MozillaCookieJar = self.__request_sso_cookie(
+            url=BaseTestCase.__ANOTHER_OAUTH_ENDPOINT__
+        )
+        response: requests.Response = requests.get(
+            url=self.protected_endpoint, cookies=access_cookie
+        )
+        status_code: int = response.status_code
+        body: dict[str, str] = response.json()
+        self.assertEqual(
+            200,
+            status_code,
+            msg=(
+                "Request should have finish successfully. "
+                "A new session cookie should have been requested for the user"
+            ),
+        )
+        self.assertEqual(
+            body,
+            BaseTestCase.__REQUEST_SUCCESS__,
+            msg="The dummy response is different than expected",
         )
