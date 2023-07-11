@@ -176,6 +176,7 @@ class BaseTestCase(unittest.TestCase):
             enable_oidc_flow=enable_oidc_flow,
             client_id=self.client_id,
             client_secret=self.client_secret,
+            disable_secure_policy=True,
         )
 
         # Create a submodule for the protected resource

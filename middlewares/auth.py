@@ -85,6 +85,9 @@ class AuthenticationMiddleware:
         client_secret (str | None): Client secret used into the OIDC flow for authenticating this
             middleware against the IAM service to request tokens. It is mandatory to provide
             it if `enable_oidc_flow` is enabled
+        disable_secure_policy (bool): If enabled, this disables the secure policy
+            for Flask session cookie. For production environments, the Secure policy
+            must be enabled if SameSite policy is None
     """
 
     OIDC_CONFIG_DEFAULT: str = (
@@ -103,6 +106,7 @@ class AuthenticationMiddleware:
         enable_oidc_flow: bool = bool(os.getenv("ENABLE_OIDC_FLOW")),
         client_id: str | None = os.getenv("CLIENT_ID"),
         client_secret: str | None = os.getenv("CLIENT_SECRET"),
+        disable_secure_policy: bool = bool(os.getenv("DISABLE_SECURE_COOKIE_POLICY")),
     ):
         self.oidc_config: str = os.getenv(
             "REALM_OIDC_CONFIG", AuthenticationMiddleware.OIDC_CONFIG_DEFAULT
@@ -115,6 +119,7 @@ class AuthenticationMiddleware:
         self.client_id: str | None = client_id
         self.client_secret: str | None = client_secret
         self.enable_oidc_flow: bool = enable_oidc_flow
+        self.disable_secure_policy: bool = disable_secure_policy
 
         # Verify client_id value is set properly
         if not self.client_id:
@@ -137,7 +142,9 @@ class AuthenticationMiddleware:
             raise ValueError(client_secret_error_msg)
 
         self.valid_audiences: list[str] = [self.client_id]
-        self.app: Flask = self.__configure_session_cookie_security(app=app)
+        self.app: Flask = self.__configure_session_cookie_security(
+            app=app, disable_secure_policy=disable_secure_policy
+        )
         self.jwk: jwt.PyJWK = self.__retrieve_jwk()
 
         # Enable OIDC flow if required
@@ -189,7 +196,9 @@ class AuthenticationMiddleware:
                 description="Error validating access token", response=response
             ) from auth_error
 
-    def __configure_session_cookie_security(self, app: Flask) -> Flask:
+    def __configure_session_cookie_security(
+        self, app: Flask, disable_secure_policy: bool
+    ) -> Flask:
         """
         Restrict the access to the session cookie.
         A Flask session cookie is going to be used to store the JWT token to authenticate the user,
@@ -200,13 +209,17 @@ class AuthenticationMiddleware:
         For more information, please see:
         https://flask.palletsprojects.com/en/2.2.x/quickstart/?highlight=session#sessions
 
+        Args:
+            disable_secure_policy (bool): Set Secure cookie policy to false. This is usefull for testing
+                environment. This flag must be False for production environments
+
         Returns:
             Flask: Flask application with some cookie security policies configured
         """
         # Configure the session cookie
         app.config["SESSION_COOKIE_SAMESITE"] = "None"
         app.config["SESSION_COOKIE_HTTPONLY"] = True
-        app.config["SESSION_COOKIE_SECURE"] = False
+        app.config["SESSION_COOKIE_SECURE"] = not disable_secure_policy
         return app
 
     def __register_blueprint(self) -> Blueprint:
@@ -388,14 +401,13 @@ class AuthenticationMiddleware:
                 provided via Authorization header or if the provided access token
                 is expired
             UserInfo: User's information parsed from the JWT available inside the session cookie
+
+        Raises:
+            ExpiredSignatureError: If the provided JWT expired
+            HTTPException: If there is another issue validating the provided JWT
         """
-        access_token: str | None = request.headers.get("Authorization", "")
-        if access_token:
-            try:
-                return self.__decode_token(access_token=access_token)
-            except ExpiredSignatureError:
-                return None
-        return None
+        access_token: str = request.headers.get("Authorization", "")
+        return self.__decode_token(access_token=access_token)
 
     def authenticate(
         self, request: Request, flask_session: SessionMixin
@@ -440,15 +452,10 @@ class AuthenticationMiddleware:
             return None
 
         user_data: UserInfo | None = None
-        user_data = self.__retrieve_token_from_request(request=request)
-        if user_data:
-            flask_session["user"] = user_data
-            return None
-
         # Check if the middleware handles OIDC flow. If so, check the Flask session cookie
         if self.enable_oidc_flow:
             user_data = self.__retrieve_token_from_session(flask_session=flask_session)
-            if user_data:
+            if user_data and isinstance(user_data, UserInfo):
                 flask_session["user"] = user_data
                 return None
 
@@ -459,14 +466,26 @@ class AuthenticationMiddleware:
             redirect_uri: str = url_for(endpoint="oauth.auth")
             return redirect(location=redirect_uri)
 
-        msg: str = (
-            "Please provide a JWT via Authorization header. "
-            "If a JWT was provided, please provide a JWT "
-            "that is valid because the current is expired"
-        )
-        response: Response = jsonify({"msg": msg})
-        response.status_code = 401
-        raise HTTPException(
-            description="JWT checked via Authorization header is invalid",
-            response=response,
-        )
+        try:
+            user_data = self.__retrieve_token_from_request(request=request)
+            if user_data and isinstance(user_data, UserInfo):
+                flask_session["user"] = user_data
+                return None
+            msg: str = (
+                "Please provide a JWT, valid for this application, via Authorization header. "
+                "No JWT was provided via Authorization header"
+            )
+            response: Response = jsonify({"msg": msg})
+            response.status_code = 401
+            raise HTTPException(
+                description="JWT not found via Authorization header",
+                response=response,
+            )
+        except ExpiredSignatureError as expired:
+            msg = "The provided JWT has expired"
+            response = jsonify({"msg": msg})
+            response.status_code = 401
+            raise HTTPException(
+                description="JWT checked via Authorization header is invalid",
+                response=response,
+            ) from expired
