@@ -4,6 +4,7 @@ Module that contains UserInfo class
 from flask import session
 from ..utils.settings import Settings
 from ..utils.cache import TimeoutCache
+from ..middlewares.auth import UserInfo as MiddlewareUserInfo
 
 
 class UserInfo:
@@ -58,17 +59,12 @@ class UserInfo:
         # Assume the user is already authenticated
         # This reponsibility relies on the Authentication middleware
         # If you require more details, please see: middlewares/auth.py
-        user_data: dict = session.get("user", {})
-
-        # TODO: In the near future, migrate all applications to use roles instead of e-group names.
-        # Delegate this responsibility only to CERN Application Portal.
-        # Keep inside all user databases only a history of permissions changes.
-        # For this moment, the role will have the same name the required e-group has
-        groups = user_data.get("roles", [])
-        username = user_data.get("username", "")
-        fullname = user_data.get("fullname", "")
-        name = user_data.get("given_name", "")
-        lastname = user_data.get("family_name")
+        user_data: MiddlewareUserInfo = session.get("user", MiddlewareUserInfo())
+        groups = user_data.roles
+        username = user_data.username
+        fullname = user_data.fullname
+        name = user_data.given_name
+        lastname = user_data.family_name
 
         user_role = "user"
         groups_set = set(groups)
@@ -83,7 +79,6 @@ class UserInfo:
             "lastname": lastname,
             "fullname": fullname,
             "username": username,
-            # 'groups': groups,
             "role": user_role,
             "role_index": role_index,
         }
