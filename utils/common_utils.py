@@ -1,10 +1,12 @@
 """
 Common utils
 """
+import os
 import re
 import json
 import logging
 import hashlib
+import requests
 import xml.etree.ElementTree as XMLet
 
 from core_lib.utils.ssh_executor import SSHExecutor
@@ -16,6 +18,81 @@ from ..utils.global_config import Config
 
 # Scram arch cache to save some requests to cmssdt.cern.ch
 __scram_arch_cache = TimeoutCache(3600)
+
+
+def get_client_credentials() -> dict[str, str]:
+    """
+    This function retrieves the client credentials given
+    via environment variables
+
+    Returns:
+        dict: Credentials required to request an access token via
+            client credential grant
+
+    Raises:
+        RuntimeError: If there are environment variables that were not provided
+    """
+    required_variables = [
+        "CALLBACK_CLIENT_ID",
+        "CALLBACK_CLIENT_SECRET",
+        "APPLICATION_CLIENT_ID",
+    ]
+    credentials = {}
+    msg = (
+        "Some required environment variables are not available "
+        "to send the callback notification. Please set them:\n"
+    )
+    for var in required_variables:
+        value = os.getenv(var)
+        if not value:
+            msg += "%s\n" % var
+            continue
+        credentials[var] = value
+
+    if len(credentials) == len(required_variables):
+        logging.info("Returning OAuth2 credentials for requesting a token")
+        return credentials
+
+    logging.error(msg)
+    raise RuntimeError(msg)
+
+
+def get_access_token(credentials: dict[str, str]) -> str:
+    """
+    Request an access token to Keycloak (CERN SSO) via a
+    client credential grant.
+
+    Args:
+        credentials (dict): Credentials required to perform a client credential grant
+            Client ID, Client Secret and Target application (audience)
+
+    Returns:
+        str: Authorization header including the captured access token
+
+    Raises:
+        RuntimeError: If there is an issue requesting the access token
+    """
+    cern_api_access_token = "https://auth.cern.ch/auth/realms/cern/api-access/token"
+    client_id = credentials["CALLBACK_CLIENT_ID"]
+    client_secret = credentials["CALLBACK_CLIENT_SECRET"]
+    audience = credentials["APPLICATION_CLIENT_ID"]
+    
+    url_encoded_data: dict = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "audience": audience,
+    }
+    
+    response: requests.Response = requests.post(url=cern_api_access_token, data=url_encoded_data)
+    token_response: dict[str, str] = response.json()
+    token: str = token_response.get("access_token", "")
+    if not token:
+        token_error = "Invalid access token request. Details: %s" % token_response
+        logging.error(token_error)
+        raise RuntimeError(token_error)
+
+    return f"Bearer {token}"
 
 
 def clean_split(string, separator=',', maxsplit=-1):
@@ -209,24 +286,30 @@ def change_workflow_priority(workflow_names, priority):
             logger.debug(response)
 
 
-def refresh_workflows_in_stats(workflow_names):
+def refresh_workflows_in_stats(workflow_names) -> None:
     """
     Force Stats2 to update workflows with given workflow names
     """
+    client_credentials: dict[str, str] = get_client_credentials()
     workflow_names = [w.strip() for w in workflow_names if w.strip()]
     if not workflow_names:
         return
 
     logger = logging.getLogger('logger')
-    credentials_file = Config.get('credentials_file')
-    commands = ['cd /home/pdmvserv/private',
-                'source setup_credentials.sh',
-                'cd /home/pdmvserv/Stats2']
-    commands += [f'python3 stats_update.py --action update --name {w}' for w in workflow_names]
     logger.info('Will make Stats2 refresh these workflows: %s', ', '.join(workflow_names))
     with Locker().get_lock('refresh-stats'):
-        with SSHExecutor('vocms074.cern.ch', credentials_file) as ssh_executor:
-            ssh_executor.execute_command(commands)
+        for workflow in workflow_names:
+            logger.info('Refreshing workflow: %s' % workflow)
+            authorization_header: str = get_access_token(credentials=client_credentials)
+            stats_update_endpoint: str = f"https://cms-pdmv-prod.web.cern.ch/stats/api/update?workflow={workflow}"
+            headers: dict[str, str] = {
+                "Authorization": authorization_header
+            }
+            response: requests.Response = requests.post(url=stats_update_endpoint, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"Workflow: {workflow} updated successfully")
+            else:
+                logger.error(f"Error refreshing workflow via Stats2 update endpoint: {response}")
 
     logger.info('Finished making Stats2 refresh workflows')
 
