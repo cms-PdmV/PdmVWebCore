@@ -10,7 +10,6 @@ class Config:
     """
 
     __CONFIG_VALUES = {}
-    __MULTIVALUE_TOKEN = "|"
 
     def __init__(self):
         pass
@@ -25,9 +24,7 @@ class Config:
         config.read(filename)
         config = dict(config.items(section))
         for key, value in dict(config).items():
-            if Config.__MULTIVALUE_TOKEN in value:
-                config[key] = value.strip().split(Config.__MULTIVALUE_TOKEN)
-            elif value.lower() in ("true", "false"):
+            if value.lower() in ("true", "false"):
                 config[key] = value.lower() == "true"
             elif value.isdigit():
                 config[key] = int(value)
