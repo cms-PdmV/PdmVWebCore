@@ -4,23 +4,23 @@ Module that handles all SSH operations - both ssh and ftp
 from io import BytesIO
 from paramiko.ssh_exception import AuthenticationException
 
-import json
 import time
 import logging
 import paramiko
 
 
-class SSHExecutor():
+class SSHExecutor:
     """
     SSH executor allows to perform remote commands and upload/download files
     """
 
-    def __init__(self, host, credentials_path):
+    def __init__(self, host, username: str, password: str):
         self.ssh_client = None
         self.ftp_client = None
         self.logger = logging.getLogger()
         self.remote_host = host
-        self.credentials_file_path = credentials_path
+        self.username = username
+        self.password = password
         self.timeout = 3600
         self.max_retries = 3
 
@@ -42,15 +42,11 @@ class SSHExecutor():
                 if self.ssh_client:
                     self.close_connections()
 
-                with open(self.credentials_file_path) as json_file:
-                    credentials = json.load(json_file)
-
-                self.logger.info('Credentials loaded successfully: %s', credentials['username'])
                 self.ssh_client = paramiko.SSHClient()
                 self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 self.ssh_client.connect(self.remote_host,
-                                        username=credentials["username"],
-                                        password=credentials["password"],
+                                        username=self.username,
+                                        password=self.password,
                                         timeout=45)
                 self.logger.debug('Done setting up ssh')
                 return
