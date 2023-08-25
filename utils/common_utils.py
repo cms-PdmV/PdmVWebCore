@@ -9,7 +9,6 @@ import hashlib
 import requests
 import xml.etree.ElementTree as XMLet
 
-from core_lib.utils.ssh_executor import SSHExecutor
 from ..utils.cache import TimeoutCache
 from ..utils.connection_wrapper import ConnectionWrapper
 from ..utils.locker import Locker
