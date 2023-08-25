@@ -12,7 +12,6 @@ import xml.etree.ElementTree as XMLet
 from ..utils.cache import TimeoutCache
 from ..utils.connection_wrapper import ConnectionWrapper
 from ..utils.locker import Locker
-from ..utils.global_config import Config
 
 
 # Scram arch cache to save some requests to cmssdt.cern.ch
@@ -224,8 +223,8 @@ def dbs_datasetlist(query):
     else:
         query = query[query.index('/'):]
 
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
         dbs_response = dbs_conn.api('POST',
                                     '/dbs/prod/global/DBSReader/datasetlist',
@@ -248,8 +247,8 @@ def dbs_dataset_runs(dataset):
     if not dataset:
         return []
 
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
         with Locker().get_lock('get-dataset-runs'):
             dbs_response = dbs_conn.api('GET',
@@ -273,9 +272,9 @@ def change_workflow_priority(workflow_names, priority):
         return
 
     logger = logging.getLogger('logger')
-    cmsweb_url = Config.get('cmsweb_url')
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    cmsweb_url = os.getenv('CMSWEB_URL', '')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper(cmsweb_url, grid_cert, grid_key) as cmsweb_connection:
         for workflow in workflow_names:
             logger.info('Changing "%s" priority to %s', workflow, priority)
@@ -363,9 +362,10 @@ def cmsweb_reject_workflows(workflow_status_pairs):
     Function expects list of tuples where first item is workflow name and second
     is current workflow status
     """
-    cmsweb_url = Config.get('cmsweb_url')
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+
+    cmsweb_url = os.getenv('CMSWEB_URL', '')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     headers = {'Content-type': 'application/json',
                'Accept': 'application/json'}
     logger = logging.getLogger('logger')
