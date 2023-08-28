@@ -45,7 +45,6 @@ class Emailer():
         message['To'] = ', '.join(recipients)
         message['Cc'] = 'pdmvserv@cern.ch'
         smtp = smtplib.SMTP(host="cernmx.cern.ch", port=25)
-        smtp.connect()
         self.logger.debug('Sending email %s to %s', message['Subject'], message['To'])
         smtp.send_message(message)
         smtp.quit()
