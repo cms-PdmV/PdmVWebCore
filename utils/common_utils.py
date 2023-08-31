@@ -5,6 +5,7 @@ import os
 import re
 import json
 import logging
+import datetime
 import hashlib
 import requests
 import xml.etree.ElementTree as XMLet
@@ -16,6 +17,7 @@ from ..utils.locker import Locker
 
 # Scram arch cache to save some requests to cmssdt.cern.ch
 __scram_arch_cache = TimeoutCache(3600)
+__ACCESS_TOKENS: dict[str, tuple[datetime.timedelta, datetime.datetime, str]] = {}
 
 
 def get_client_credentials() -> dict[str, str]:
@@ -55,17 +57,18 @@ def get_client_credentials() -> dict[str, str]:
     raise RuntimeError(msg)
 
 
-def get_access_token(credentials: dict[str, str]) -> str:
+def __fetch_access_token(credentials: dict[str, str], audience: str) -> dict:
     """
     Request an access token to Keycloak (CERN SSO) via a
     client credential grant.
 
     Args:
         credentials (dict): Credentials required to perform a client credential grant
-            Client ID, Client Secret and Target application (audience)
+            Client ID, Client Secret
+        audience (str): Target application for requesting the token.
 
     Returns:
-        str: Authorization header including the captured access token
+        dict: Access token with its metadata.
 
     Raises:
         RuntimeError: If there is an issue requesting the access token
@@ -73,16 +76,17 @@ def get_access_token(credentials: dict[str, str]) -> str:
     cern_api_access_token = "https://auth.cern.ch/auth/realms/cern/api-access/token"
     client_id = credentials["CALLBACK_CLIENT_ID"]
     client_secret = credentials["CALLBACK_CLIENT_SECRET"]
-    audience = credentials["APPLICATION_CLIENT_ID"]
-    
+
     url_encoded_data: dict = {
         "grant_type": "client_credentials",
         "client_id": client_id,
         "client_secret": client_secret,
         "audience": audience,
     }
-    
-    response: requests.Response = requests.post(url=cern_api_access_token, data=url_encoded_data)
+
+    response: requests.Response = requests.post(
+        url=cern_api_access_token, data=url_encoded_data
+    )
     token_response: dict[str, str] = response.json()
     token: str = token_response.get("access_token", "")
     if not token:
@@ -90,6 +94,46 @@ def get_access_token(credentials: dict[str, str]) -> str:
         logging.error(token_error)
         raise RuntimeError(token_error)
 
+    return token_response
+
+
+def get_access_token(credentials: dict[str, str]) -> str:
+    """
+    Retrieves an access token to send via the Authorization header
+    to authenticate one request to another service.
+
+    Args:
+        credentials (dict): Credentials required to perform a client credential grant
+            Client ID, Client Secret and target applications (audience) if required
+    Returns:
+        str: Authorization header to send into HTTP request.
+
+    Raises:
+        RuntimeError: If there is an issue requesting the access token
+    """
+    # Check if we have already a valid token
+    audience = credentials["APPLICATION_CLIENT_ID"]
+    access_token: tuple[
+        datetime.timedelta, datetime.datetime, str
+    ] | None = __ACCESS_TOKENS.get(audience)
+    if access_token:
+        # Check if the token is valid, if so return it
+        valid_delta, requested_time, token = access_token
+        current_time: datetime.datetime = datetime.datetime.now()
+        elapsed_time: datetime.timedelta = current_time - requested_time
+        if elapsed_time < valid_delta:
+            return f"Bearer {token}"
+
+    # Request a new access token and store it
+    requested_time = datetime.datetime.now()
+    access_token_response: dict[str, str] = __fetch_access_token(
+        credentials=credentials, audience=audience
+    )
+    token = access_token_response["access_token"]
+    valid_delta = datetime.timedelta(
+        seconds=int(int(access_token_response["expires_in"]) * 0.75)
+    )
+    __ACCESS_TOKENS[audience] = (valid_delta, requested_time, token)
     return f"Bearer {token}"
 
 
