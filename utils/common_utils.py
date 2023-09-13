@@ -1,21 +1,140 @@
 """
 Common utils
 """
+import os
 import re
 import json
 import logging
+import datetime
 import hashlib
+import requests
 import xml.etree.ElementTree as XMLet
 
-from core_lib.utils.ssh_executor import SSHExecutor
 from ..utils.cache import TimeoutCache
 from ..utils.connection_wrapper import ConnectionWrapper
 from ..utils.locker import Locker
-from ..utils.global_config import Config
 
 
 # Scram arch cache to save some requests to cmssdt.cern.ch
 __scram_arch_cache = TimeoutCache(3600)
+__ACCESS_TOKENS: dict[str, tuple[datetime.timedelta, datetime.datetime, str]] = {}
+
+
+def get_client_credentials() -> dict[str, str]:
+    """
+    This function retrieves the client credentials given
+    via environment variables
+
+    Returns:
+        dict: Credentials required to request an access token via
+            client credential grant
+
+    Raises:
+        RuntimeError: If there are environment variables that were not provided
+    """
+    required_variables = [
+        "CALLBACK_CLIENT_ID",
+        "CALLBACK_CLIENT_SECRET",
+        "APPLICATION_CLIENT_ID",
+    ]
+    credentials = {}
+    msg = (
+        "Some required environment variables are not available "
+        "to send the callback notification. Please set them:\n"
+    )
+    for var in required_variables:
+        value = os.getenv(var)
+        if not value:
+            msg += "%s\n" % var
+            continue
+        credentials[var] = value
+
+    if len(credentials) == len(required_variables):
+        logging.info("Returning OAuth2 credentials for requesting a token")
+        return credentials
+
+    logging.error(msg)
+    raise RuntimeError(msg)
+
+
+def __fetch_access_token(credentials: dict[str, str], audience: str) -> dict:
+    """
+    Request an access token to Keycloak (CERN SSO) via a
+    client credential grant.
+
+    Args:
+        credentials (dict): Credentials required to perform a client credential grant
+            Client ID, Client Secret
+        audience (str): Target application for requesting the token.
+
+    Returns:
+        dict: Access token with its metadata.
+
+    Raises:
+        RuntimeError: If there is an issue requesting the access token
+    """
+    cern_api_access_token = "https://auth.cern.ch/auth/realms/cern/api-access/token"
+    client_id = credentials["CALLBACK_CLIENT_ID"]
+    client_secret = credentials["CALLBACK_CLIENT_SECRET"]
+
+    url_encoded_data: dict = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "audience": audience,
+    }
+
+    response: requests.Response = requests.post(
+        url=cern_api_access_token, data=url_encoded_data
+    )
+    token_response: dict[str, str] = response.json()
+    token: str = token_response.get("access_token", "")
+    if not token:
+        token_error = "Invalid access token request. Details: %s" % token_response
+        logging.error(token_error)
+        raise RuntimeError(token_error)
+
+    return token_response
+
+
+def get_access_token(credentials: dict[str, str]) -> str:
+    """
+    Retrieves an access token to send via the Authorization header
+    to authenticate one request to another service.
+
+    Args:
+        credentials (dict): Credentials required to perform a client credential grant
+            Client ID, Client Secret and target applications (audience) if required
+    Returns:
+        str: Authorization header to send into HTTP request.
+
+    Raises:
+        RuntimeError: If there is an issue requesting the access token
+    """
+    # Check if we have already a valid token
+    audience = credentials["APPLICATION_CLIENT_ID"]
+    access_token: tuple[
+        datetime.timedelta, datetime.datetime, str
+    ] | None = __ACCESS_TOKENS.get(audience)
+    if access_token:
+        # Check if the token is valid, if so return it
+        valid_delta, requested_time, token = access_token
+        current_time: datetime.datetime = datetime.datetime.now()
+        elapsed_time: datetime.timedelta = current_time - requested_time
+        if elapsed_time < valid_delta:
+            return f"Bearer {token}"
+
+    # Request a new access token and store it
+    requested_time = datetime.datetime.now()
+    access_token_response: dict[str, str] = __fetch_access_token(
+        credentials=credentials, audience=audience
+    )
+    token = access_token_response["access_token"]
+    valid_delta = datetime.timedelta(
+        seconds=int(int(access_token_response["expires_in"]) * 0.75)
+    )
+    __ACCESS_TOKENS[audience] = (valid_delta, requested_time, token)
+    return f"Bearer {token}"
 
 
 def clean_split(string, separator=',', maxsplit=-1):
@@ -148,8 +267,8 @@ def dbs_datasetlist(query):
     else:
         query = query[query.index('/'):]
 
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
         dbs_response = dbs_conn.api('POST',
                                     '/dbs/prod/global/DBSReader/datasetlist',
@@ -172,8 +291,8 @@ def dbs_dataset_runs(dataset):
     if not dataset:
         return []
 
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper('https://cmsweb-prod.cern.ch:8443', grid_cert, grid_key) as dbs_conn:
         with Locker().get_lock('get-dataset-runs'):
             dbs_response = dbs_conn.api('GET',
@@ -197,9 +316,9 @@ def change_workflow_priority(workflow_names, priority):
         return
 
     logger = logging.getLogger('logger')
-    cmsweb_url = Config.get('cmsweb_url')
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+    cmsweb_url = os.getenv('CMSWEB_URL', '')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     with ConnectionWrapper(cmsweb_url, grid_cert, grid_key) as cmsweb_connection:
         for workflow in workflow_names:
             logger.info('Changing "%s" priority to %s', workflow, priority)
@@ -209,24 +328,30 @@ def change_workflow_priority(workflow_names, priority):
             logger.debug(response)
 
 
-def refresh_workflows_in_stats(workflow_names):
+def refresh_workflows_in_stats(workflow_names) -> None:
     """
     Force Stats2 to update workflows with given workflow names
     """
+    client_credentials: dict[str, str] = get_client_credentials()
     workflow_names = [w.strip() for w in workflow_names if w.strip()]
     if not workflow_names:
         return
 
     logger = logging.getLogger('logger')
-    credentials_file = Config.get('credentials_file')
-    commands = ['cd /home/pdmvserv/private',
-                'source setup_credentials.sh',
-                'cd /home/pdmvserv/Stats2']
-    commands += [f'python3 stats_update.py --action update --name {w}' for w in workflow_names]
     logger.info('Will make Stats2 refresh these workflows: %s', ', '.join(workflow_names))
     with Locker().get_lock('refresh-stats'):
-        with SSHExecutor('vocms074.cern.ch', credentials_file) as ssh_executor:
-            ssh_executor.execute_command(commands)
+        for workflow in workflow_names:
+            logger.info('Refreshing workflow: %s' % workflow)
+            authorization_header: str = get_access_token(credentials=client_credentials)
+            stats_update_endpoint: str = f"https://cms-pdmv-prod.web.cern.ch/stats/api/update?workflow={workflow}"
+            headers: dict[str, str] = {
+                "Authorization": authorization_header
+            }
+            response: requests.Response = requests.post(url=stats_update_endpoint, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"Workflow: {workflow} updated successfully")
+            else:
+                logger.error(f"Error refreshing workflow via Stats2 update endpoint: {response}")
 
     logger.info('Finished making Stats2 refresh workflows')
 
@@ -281,9 +406,10 @@ def cmsweb_reject_workflows(workflow_status_pairs):
     Function expects list of tuples where first item is workflow name and second
     is current workflow status
     """
-    cmsweb_url = Config.get('cmsweb_url')
-    grid_cert = Config.get('grid_user_cert')
-    grid_key = Config.get('grid_user_key')
+
+    cmsweb_url = os.getenv('CMSWEB_URL', '')
+    grid_cert = os.getenv('GRID_USER_CERT', '')
+    grid_key = os.getenv('GRID_USER_KEY', '')
     headers = {'Content-type': 'application/json',
                'Accept': 'application/json'}
     logger = logging.getLogger('logger')
