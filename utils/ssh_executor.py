@@ -7,6 +7,7 @@ from paramiko.ssh_exception import AuthenticationException
 import time
 import logging
 import paramiko
+import paramiko.ssh_gss
 
 
 class SSHExecutor:
@@ -31,6 +32,20 @@ class SSHExecutor:
         self.close_connections()
         return False
 
+    def __use_gss_api(self) -> bool:
+        """
+        Check if it is possible to authenticate to the server
+        using GSS-API.
+        """
+        use_gss_api: bool = False
+        try:
+            paramiko.ssh_gss.GSSAuth(auth_method="gssapi-with-mic")
+            use_gss_api = True
+        except ImportError:
+            pass
+
+        return use_gss_api
+
     def setup_ssh(self):
         """
         Initiate SSH connection and save it as self.ssh_client
@@ -44,10 +59,23 @@ class SSHExecutor:
 
                 self.ssh_client = paramiko.SSHClient()
                 self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                self.ssh_client.connect(self.remote_host,
-                                        username=self.username,
-                                        password=self.password,
-                                        timeout=45)
+                use_gss_api = self.__use_gss_api()
+                if use_gss_api:
+                    self.logger.info("Using Kerberos ticket for authentication")
+                    self.ssh_client.connect(
+                        self.remote_host,
+                        username=self.username,
+                        timeout=30,
+                        gss_auth=use_gss_api,
+                    )
+                else:
+                    self.ssh_client.connect(
+                        self.remote_host,
+                        username=self.username,
+                        password=self.password,
+                        timeout=30,
+                    )
+
                 self.logger.debug('Done setting up ssh')
                 return
             except AuthenticationException as e:
