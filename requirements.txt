@@ -1,3 +1,4 @@
+# Just for reference
 Flask==2.2.3
 Flask-RESTful==0.3.9
 pymongo==3.13.0
@@ -7,3 +8,5 @@ cryptography==39.0.1
 requests==2.31.0
 Werkzeug==2.2.3
 paramiko==3.0.0
+gssapi>=1.8.3
+pyasn1>=0.5.1 
