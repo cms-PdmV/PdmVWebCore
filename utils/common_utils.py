@@ -458,7 +458,7 @@ def run_commands_in_singularity(commands, scram_arch, script_name=None):
 
     container_os = clean_split(scram_arch, '_')[0]
     if container_os == 'slc7':
-        container_os = 'cc7'
+        container_os = 'el7'
 
     container_path = '/cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw'
     bash += ['',
@@ -506,10 +506,11 @@ def run_commands_in_cmsenv(commands, cmssw_version, scram_arch):
         commands  = [commands.strip()]
 
     commands = setup + [''] + commands
-    if os_name != 'slc7':
-        script_hash = get_hash(commands)
-        script_name = f'singularity-script-{script_hash}'
-        commands = run_commands_in_singularity(commands, scram_arch, script_name)
+
+    # Always execute cms-sw procedures using singularity containers
+    script_hash = get_hash(commands)
+    script_name = f'singularity-script-{script_hash}'
+    commands = run_commands_in_singularity(commands, scram_arch, script_name)
 
     commands = '\n'.join(commands)
     return commands
