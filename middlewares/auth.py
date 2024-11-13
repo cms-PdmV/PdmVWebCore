@@ -107,6 +107,7 @@ class AuthenticationMiddleware:
         client_id: str | None = os.getenv("CLIENT_ID"),
         client_secret: str | None = os.getenv("CLIENT_SECRET"),
         disable_secure_policy: bool = bool(os.getenv("DISABLE_SECURE_COOKIE_POLICY")),
+        extra_client_id: str | None = os.getenv("EXTRA_CLIENT_ID")
     ):
         self.oidc_config: str = os.getenv(
             "REALM_OIDC_CONFIG", AuthenticationMiddleware.OIDC_CONFIG_DEFAULT
@@ -142,6 +143,14 @@ class AuthenticationMiddleware:
             raise ValueError(client_secret_error_msg)
 
         self.valid_audiences: list[str] = [self.client_id]
+        self.extra_client_id = extra_client_id
+        if self.extra_client_id:
+            self.valid_audiences.append(self.extra_client_id)
+
+        logger.info(
+            "Accepting tokens from the following valid audiences: %s", self.valid_audiences
+        )
+
         self.app: Flask = self.__configure_session_cookie_security(
             app=app, disable_secure_policy=disable_secure_policy
         )
