@@ -50,19 +50,21 @@ class BaseTestCase(unittest.TestCase):
     __CERN_OAUTH_TOKEN_ENDPOINT: str = (
         "https://auth.cern.ch/auth/realms/cern/api-access/token"
     )
-    __ANOTHER_OAUTH_ENDPOINT__: str = "https://cms-pdmv.cern.ch/valdb"
+    __ANOTHER_OAUTH_ENDPOINT__: str = "https://cms-pdmv-prod.web.cern.ch/valdb"
 
     def prepare_test(
         self,
         port: int = int(os.getenv("PORT", "-1")),
         client_id: str = os.getenv("CLIENT_ID", ""),
         client_secret: str = os.getenv("CLIENT_SECRET", ""),
+        extra_client_id: str | None = os.getenv("EXTRA_CLIENT_ID"),
         enable_oidc_flow: bool = False,
     ):
         self.host: str = "localhost"
         self.port: int = port
         self.client_id: str = client_id
         self.client_secret: str = client_secret
+        self.extra_client_id = extra_client_id
         self.secret_key: str = secrets.token_hex()
         self.__validate_environment()
         self.server: Process | None = None
@@ -176,6 +178,7 @@ class BaseTestCase(unittest.TestCase):
             enable_oidc_flow=enable_oidc_flow,
             client_id=self.client_id,
             client_secret=self.client_secret,
+            extra_client_id=self.extra_client_id,
             disable_secure_policy=True,
         )
 
@@ -281,6 +284,49 @@ class BaseTestCase(unittest.TestCase):
         access_token: str = response.json().get("access_token", "")
         status_code: int = response.status_code
         return status_code, access_token
+    
+    def _request_id_token(self) -> tuple[int, str]:
+        """
+        Request an ID token via `Device Authorization Grant`
+        to CERN Authorization Server. This requires human intervention
+        to complete the authorization flow
+
+        Returns:
+            int: HTTP Response status code
+            str: JWT retrieved from CERN Authorization Server
+        """
+        token_endpoint = (
+            "https://auth.cern.ch/auth/realms/cern/protocol/openid-connect/token"
+        )
+        device_endpoint = (
+            "https://auth.cern.ch/auth/realms/cern/protocol/openid-connect/auth/device"
+        )
+        device_code = requests.post(
+            device_endpoint,
+            data={"client_id": self.extra_client_id},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+        if device_code.status_code == 401:
+            # Make sure the extra audience is configured as a public client
+            return device_code.status_code, ""
+
+        print("Go to ", device_code.json()["verification_uri_complete"])
+        input("Press Enter once you have authenticated...")
+
+        device_completion = requests.post(
+            token_endpoint,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code.json()["device_code"],
+                "client_id": self.extra_client_id,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        device_completion_content: dict = device_completion.json()
+        id_token: str = device_completion_content.get("access_token", "")
+        return device_completion.status_code, id_token
+
 
     def setUp(self) -> None:
         """
@@ -449,6 +495,53 @@ class JWTValidationTest(BaseTestCase):
             msg="The email included into application JWT must be the same as the username",
         )
         self.assertEqual(
+            "",
+            user_info.fullname,
+            msg="User fullname must be empty for application JWT",
+        )
+
+    def test_id_token_authenticated_resource(self) -> None:
+        """
+        Check access to a protected resource providing
+        an ID token requested via Device Authorization Grant.
+        """
+        if not self.extra_client_id:
+            raise unittest.SkipTest("Extra audience not set")
+
+        _, id_token = self._request_id_token()
+        headers: dict = {"Authorization": id_token}
+        response: requests.Response = requests.get(
+            url=self.protected_endpoint, headers=headers
+        )
+        body: dict = response.json()
+        status_code: int = response.status_code
+
+        self.assertEqual(
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertEqual(
+            body,
+            BaseTestCase.__REQUEST_SUCCESS__,
+            msg="The dummy response is different than expected",
+        )
+
+    def test_id_token_user_info(self) -> None:
+        if not self.extra_client_id:
+            raise unittest.SkipTest("Extra audience not set")
+
+        _, id_token = self._request_id_token()
+        headers: dict = {"Authorization": id_token}
+        response: requests.Response = requests.get(
+            url=self.user_endpoint, headers=headers
+        )
+        body: dict = response.json()
+        status_code: int = response.status_code
+        user_info: UserInfo = UserInfo(**body)
+
+        self.assertEqual(
+            200, status_code, msg="The HTTP response has an invalid status code"
+        )
+        self.assertNotEqual(
             "",
             user_info.fullname,
             msg="User fullname must be empty for application JWT",
